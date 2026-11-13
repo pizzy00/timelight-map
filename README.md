@@ -14,3 +14,5 @@ You set the corner, size, zoom and follow in a small config file or in the game'
 - **License:** GPL-3.0-or-later ([LICENSE](LICENSE)). Uses Harmony (MIT), shipped with MeitouClient.
 
 Built by the Beep Is Too Strong team. Feedback and feature requests: open an issue, or comment on the Nexus page.
+
+Our live show, where a local AI plays Kenshi by itself 23/7: [twitch.tv/beepistoostrong](https://twitch.tv/beepistoostrong)
