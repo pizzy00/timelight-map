@@ -1,0 +1,35 @@
+Building TimeLight Map 1.0.0 from source
+========================================
+
+You need:
+  - the .NET SDK, version 9 or later
+  - a MeitouClient 0.17.4 install: the folder that holds MeitouClient.dll (the build reads the game's assemblies from
+    there as references; nothing of the game is copied into the mod)
+
+Build:
+
+    dotnet build -c Release -p:GameDir=<folder that holds MeitouClient.dll>
+
+The mod folder is written to  out/TimeLightMap/  (TimeLightMap.mod, meitou.json, Meitou.Tests.dll).
+Copy it into <Kenshi>/mods/. To write it elsewhere: add  -p:PackageDir=<folder>
+
+The build is deterministic: the same sources and the same game assemblies give the same DLL, byte for byte.
+
+Files:
+
+    TimeLightMap.csproj        the project; read its comments for why it references the game's own framework assemblies
+                               and why the assembly is named Meitou.Tests
+    Entry.cs                   the mod's entry point and its Harmony patches
+    Commands.cs                the 'topcam' console command
+    TopCam.cs                  the map picture: the second scene pass, the copy onto the screen, the commands
+    Marks.cs                   what is drawn on the picture (dots, names, labels, cone, scale, north) and the HUD side
+    MapMath.cs                 the view arithmetic, the eased view, the label layout (no game types: testable on its own)
+    MapPrefs.cs                the corner / size options and the config file (no game types)
+    package/meitou.json        the code mod manifest
+    package/TimeLightMap.mod   an empty game data file (the game finds a mod folder by its .mod file)
+    package/make-mod-file.ps1  writes TimeLightMap.mod
+    package/timelight-map.cfg.sample   the sample config file (the same text as MapPrefs.Sample)
+    README.txt                 the players' manual
+    LICENSE                    the GNU General Public License, version 3
+
+Licence: GPL-3.0-or-later. See LICENSE and README.txt.

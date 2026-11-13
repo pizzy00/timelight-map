@@ -1,0 +1,8 @@
+{
+  "id": "timelight-map",
+  "apiVersion": 2,
+  "entry": "TimeLightMap.MapEntry",
+  "assemblies": ["Meitou.Tests.dll"],
+  "version": "1.0.0",
+  "gameVersion": ">=0.17.4 <0.18.0"
+}

@@ -1,0 +1,111 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    TimeLight Map 1.0.0: a code mod for MeitouClient 0.17.4. GPL-3.0-or-later (see LICENSE).
+
+    Build:   dotnet build -c Release -p:GameDir=<folder that holds MeitouClient.dll>
+    Output:  out\TimeLightMap\  = the whole mod folder (TimeLightMap.mod, meitou.json, Meitou.Tests.dll); copy it into <game>/mods/.
+             Another place: -p:PackageDir=<folder>
+
+    The game's assemblies are references only: nothing from the game is copied next to the mod; at run time the game hands
+    the mod its own copies (and its own Harmony: never ship another).
+
+    This project builds with the .NET 9 SDK although the game runs on .NET 11: the game DLLs reference System.Runtime 11.0.0.0,
+    which the net9 reference pack cannot satisfy, so the implicit framework reference is switched off and the framework
+    assemblies of the game's own (self-contained) folder are referenced directly. With a .NET 11 SDK a plain net11.0 class
+    library referencing the five game assemblies below should do as well (not tried).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <!-- The assembly is named Meitou.Tests on purpose. The map needs game types that are internal (GameHost, WorldGpu, the
+         renderers, the HUD). MeitouClient and Meitou.Simulation declare InternalsVisibleTo("Meitou.Tests") (unsigned) for their
+         own test project, so the compiler and the runtime both give an assembly of that name friend access. No test code is
+         in here. See README.txt, "The file is called Meitou.Tests.dll". -->
+    <AssemblyName>Meitou.Tests</AssemblyName>
+    <RootNamespace>TimeLightMap</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>TimeLight Map</Product>
+    <AssemblyTitle>TimeLight Map</AssemblyTitle>
+    <Description>An in-game 3D picture-in-picture map for MeitouClient</Description>
+    <Company>TimeLight Map contributors</Company>
+    <Copyright>Copyright (C) 2026 TimeLight Map contributors. GPL-3.0-or-later.</Copyright>
+    <LangVersion>13</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <!-- Same bytes from the same sources on any machine: no build paths in the DLL or its embedded symbols. -->
+    <Deterministic>true</Deterministic>
+    <DebugType>embedded</DebugType>
+    <PathMap>$(MSBuildProjectDirectory)=/_/TimeLightMap</PathMap>
+    <TargetFrameworkMonikerAssemblyAttributesPath>$(MSBuildProjectDirectory)\obj\TargetFramework.AssemblyAttributes.cs</TargetFrameworkMonikerAssemblyAttributesPath>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- CA1416: the referenced framework may be the game's Linux build (System.Console is marked unix-only there) -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- GameDir and PackageDir come from the command line (a property given there cannot be changed in here, so the
+         project works with its own copies, each with a trailing slash) -->
+    <GameDir Condition="'$(GameDir)' == ''">$(MSBuildThisFileDirectory)..\game</GameDir>
+    <PackageDir Condition="'$(PackageDir)' == ''">$(MSBuildThisFileDirectory)out\TimeLightMap</PackageDir>
+    <GameFolder>$([MSBuild]::EnsureTrailingSlash('$(GameDir)'))</GameFolder>
+    <ModFolder>$([MSBuild]::EnsureTrailingSlash('$(PackageDir)'))</ModFolder>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="out\**" />
+    <None Remove="out\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the .NET framework, from the game's self-contained build folder -->
+    <Reference Include="System.Private.CoreLib"><HintPath>$(GameFolder)System.Private.CoreLib.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Runtime"><HintPath>$(GameFolder)System.Runtime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="netstandard"><HintPath>$(GameFolder)netstandard.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Collections"><HintPath>$(GameFolder)System.Collections.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Collections.Concurrent"><HintPath>$(GameFolder)System.Collections.Concurrent.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Linq"><HintPath>$(GameFolder)System.Linq.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Console"><HintPath>$(GameFolder)System.Console.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Memory"><HintPath>$(GameFolder)System.Memory.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Numerics.Vectors"><HintPath>$(GameFolder)System.Numerics.Vectors.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Reflection.Emit.ILGeneration"><HintPath>$(GameFolder)System.Reflection.Emit.ILGeneration.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Reflection.Emit.Lightweight"><HintPath>$(GameFolder)System.Reflection.Emit.Lightweight.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Reflection.Primitives"><HintPath>$(GameFolder)System.Reflection.Primitives.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Runtime.InteropServices"><HintPath>$(GameFolder)System.Runtime.InteropServices.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Runtime.Loader"><HintPath>$(GameFolder)System.Runtime.Loader.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Threading"><HintPath>$(GameFolder)System.Threading.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Text.Json"><HintPath>$(GameFolder)System.Text.Json.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.ObjectModel"><HintPath>$(GameFolder)System.ObjectModel.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Runtime.Intrinsics"><HintPath>$(GameFolder)System.Runtime.Intrinsics.dll</HintPath><Private>false</Private></Reference>
+
+    <!-- the game and its Harmony (Lib.Harmony, shipped with the game) -->
+    <Reference Include="0Harmony"><HintPath>$(GameFolder)0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MeitouClient"><HintPath>$(GameFolder)MeitouClient.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Meitou.Core"><HintPath>$(GameFolder)Meitou.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Meitou.Data"><HintPath>$(GameFolder)Meitou.Data.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Meitou.Simulation"><HintPath>$(GameFolder)Meitou.Simulation.dll</HintPath><Private>false</Private></Reference>
+
+    <!-- only so the compiler can read member signatures of the game types that mention them -->
+    <Reference Include="Silk.NET.Core"><HintPath>$(GameFolder)Silk.NET.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Silk.NET.Maths"><HintPath>$(GameFolder)Silk.NET.Maths.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Silk.NET.Input.Common"><HintPath>$(GameFolder)Silk.NET.Input.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Silk.NET.Windowing.Common"><HintPath>$(GameFolder)Silk.NET.Windowing.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Silk.NET.Vulkan"><HintPath>$(GameFolder)Silk.NET.Vulkan.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepuPhysics"><HintPath>$(GameFolder)BepuPhysics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepuUtilities"><HintPath>$(GameFolder)BepuUtilities.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="DotRecast.Core"><HintPath>$(GameFolder)DotRecast.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="DotRecast.Recast"><HintPath>$(GameFolder)DotRecast.Recast.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <!-- say plainly when the game's folder was not given, before the compiler lists every missing reference -->
+  <Target Name="CheckGameFolder" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(GameFolder)MeitouClient.dll')" Text="No MeitouClient.dll in '$(GameFolder)'. Build with -p:GameDir=&lt;the folder that holds MeitouClient.dll&gt;." />
+  </Target>
+
+  <!-- the mod folder, ready to copy into <game>/mods/ -->
+  <Target Name="PackageMod" AfterTargets="Build">
+    <MakeDir Directories="$(ModFolder)" />
+    <Copy SourceFiles="$(TargetPath);$(MSBuildThisFileDirectory)package\meitou.json;$(MSBuildThisFileDirectory)package\TimeLightMap.mod" DestinationFolder="$(ModFolder)" />
+    <Message Importance="high" Text="TimeLight Map mod folder: $(ModFolder)" />
+  </Target>
+</Project>
