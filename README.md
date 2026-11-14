@@ -6,7 +6,7 @@ where your camera looks, a scale bar and a north arrow.
 
 You set the corner, size, zoom and follow in a small config file or in the game's console (`topcam ...`).
 
-- **Download:** [Nexus Mods](https://www.nexusmods.com/kenshi/mods/2285), or the zip under [Releases](../../releases)
+- **Download:** [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3839458940), [Nexus Mods](https://www.nexusmods.com/kenshi/mods/2285), or the zip under [Releases](../../releases)
 - **Needs:** [MeitouClient](https://github.com/VlcekM/MeitouClient) 0.19.x (TimeLight Map 1.1.0). On MeitouClient 0.17.x use
   [1.0.0](../../releases/tag/v1.0.0). It does not run on stock Kenshi or RE_Kenshi.
   Developed and tested on the Linux (Vulkan) build; the Windows build is untried.
