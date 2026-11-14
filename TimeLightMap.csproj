@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    TimeLight Map 1.0.0: a code mod for MeitouClient 0.17.4. GPL-3.0-or-later (see LICENSE).
+    TimeLight Map 1.1.0: a code mod for MeitouClient 0.19.0. GPL-3.0-or-later (see LICENSE).
 
     Build:   dotnet build -c Release -p:GameDir=<folder that holds MeitouClient.dll>
     Output:  out\TimeLightMap\  = the whole mod folder (TimeLightMap.mod, meitou.json, Meitou.Tests.dll); copy it into <game>/mods/.
@@ -23,7 +23,7 @@
          in here. See README.txt, "The file is called Meitou.Tests.dll". -->
     <AssemblyName>Meitou.Tests</AssemblyName>
     <RootNamespace>TimeLightMap</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Product>TimeLight Map</Product>
     <AssemblyTitle>TimeLight Map</AssemblyTitle>
     <Description>An in-game 3D picture-in-picture map for MeitouClient</Description>

@@ -9,9 +9,9 @@ $ms = New-Object System.IO.MemoryStream
 $bw = New-Object System.IO.BinaryWriter($ms)
 function Put([string]$s) { $b = [System.Text.Encoding]::UTF8.GetBytes($s); $bw.Write([int]$b.Length); $bw.Write($b) }
 $bw.Write([int]16)
-$bw.Write([int]1)
-Put "Beep Is Too Strong team"
-Put "TimeLight Map 1.0.0: a live 3D map in a corner of the game window. Code mod for MeitouClient 0.17.4, no game data. Console command: topcam. GPL-3.0-or-later."
+$bw.Write([int]2)
+Put "Kenshi Live Show"
+Put "TimeLight Map 1.1.0: a live 3D map in a corner of the game window. Code mod for MeitouClient 0.19.0, no game data. Console command: topcam. GPL-3.0-or-later."
 Put ""
 Put ""
 $bw.Write([int]0)

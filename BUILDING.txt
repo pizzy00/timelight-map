@@ -1,9 +1,9 @@
-Building TimeLight Map 1.0.0 from source
+Building TimeLight Map 1.1.0 from source
 ========================================
 
 You need:
   - the .NET SDK, version 9 or later
-  - a MeitouClient 0.17.4 install: the folder that holds MeitouClient.dll (the build reads the game's assemblies from
+  - a MeitouClient 0.19.0 install: the folder that holds MeitouClient.dll (the build reads the game's assemblies from
     there as references; nothing of the game is copied into the mod)
 
 Build:

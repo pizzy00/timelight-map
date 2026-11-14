@@ -1,4 +1,4 @@
-TimeLight Map 1.0.0
+TimeLight Map 1.1.0
 ===================
 
 A live 3D map in a corner of the game window, for MeitouClient.
@@ -19,8 +19,8 @@ You choose the corner, the size, the zoom and what it follows, in a small config
 REQUIREMENTS
 ------------
 
-  - MeitouClient 0.17.4 (the open-source engine that runs Kenshi's game files). The mod is built against that release
-    and has only been used with it. The game refuses to load it on anything older than 0.17.4 or from 0.18.0 on.
+  - MeitouClient 0.19.0 (the open-source engine that runs Kenshi's game files). The mod is built against that release
+    and has only been used with it. The game refuses to load it on anything older than 0.19.0 or from 0.20.0 on.
   - It does NOT run on stock Kenshi or on RE_Kenshi. Those ignore the code; nothing happens there.
   - Developed and run on the Linux build (Vulkan). Not tried on the Windows build. Not expected to work on the macOS
     (Metal) build.
@@ -42,7 +42,7 @@ INSTALL
   3. Play. Load a save or start a new game: the map is in the top right corner, following your squad.
 
   The game's log output then has the line:
-         mod       timelight-map: TimeLight Map 1.0.0 ready: 7 patches, 0 failed; ...
+         mod       timelight-map: TimeLight Map 1.1.0 ready: 7 patches, 0 failed; ...
 
   (optional) 4. To change the defaults for every start, copy "timelight-map.cfg.sample" from this zip into
      <Kenshi>/mods/TimeLightMap/ under the name "timelight-map.cfg" and edit it. See CONFIG FILE below.
@@ -54,14 +54,14 @@ INSTALL
 THE FILE IS CALLED Meitou.Tests.dll. WHY?
 -----------------------------------------
 
-The map needs parts of the engine that MeitouClient 0.17.4 keeps internal (its renderer and its HUD). The engine
+The map needs parts of the engine that MeitouClient 0.19.0 keeps internal (its renderer and its HUD). The engine
 lets exactly one assembly name see those parts: "Meitou.Tests", the name of its own test project. So the mod's DLL
 carries that name. It contains no tests and nothing of MeitouClient's; it is this mod's own code, and the source is
-in TimeLightMap-1.0.0-source.zip. What this means for you:
+in TimeLightMap-1.1.0-source.zip. What this means for you:
 
-  - The mod is tied to MeitouClient 0.17.4. Internal parts change without notice; a new MeitouClient release may need
-    a new build of this mod. The mod declares the versions it accepts (">=0.17.4 <0.18.0"); outside them the game
-    leaves it out with a notice instead of crashing. On a later 0.17.x a part that no longer fits switches itself off
+  - The mod is tied to MeitouClient 0.19.0. Internal parts change without notice; a new MeitouClient release may need
+    a new build of this mod. The mod declares the versions it accepts (">=0.19.0 <0.20.0"); outside them the game
+    leaves it out with a notice instead of crashing. On a later 0.19.x a part that no longer fits switches itself off
     and says so in the log.
   - If a later MeitouClient closes this door, the mod will need another way in.
   - Another mod that uses the same trick ships a file of the same name in its own folder. By the engine's loader each
@@ -197,14 +197,21 @@ License as published by the Free Software Foundation, either version 3 of the Li
 version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
 warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The full text is in the file LICENSE.
 
-The complete source code is in TimeLightMap-1.0.0-source.zip, published together with this zip.
+The complete source code is in TimeLightMap-1.1.0-source.zip, published together with this zip.
 
-The mod is built against MeitouClient 0.17.4, which is licensed GPL-3.0-or-later, and patches it at run time with
+The mod is built against MeitouClient 0.19.0, which is licensed GPL-3.0-or-later, and patches it at run time with
 Harmony, which is licensed MIT. Both come with the game; neither is included here. No game data or assets are included.
+
+
+VERSIONS
+--------
+
+1.1.0  Built for MeitouClient 0.19.0 (accepts 0.19.x). The map itself is unchanged.
+1.0.0  First version, built for MeitouClient 0.17.4 (accepts 0.17.4 and later 0.17.x).
 
 
 CREDITS
 -------
 
-Built by the Beep Is Too Strong team.
+Built by the Kenshi Live Show team.
 Harmony (MIT) by Andreas Pardeike and contributors, as shipped with MeitouClient.
