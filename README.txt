@@ -1,4 +1,4 @@
-TimeLight Map 1.1.0
+TimeLight Map 1.2.0
 ===================
 
 A live 3D map in a corner of the game window, for MeitouClient.
@@ -19,8 +19,9 @@ You choose the corner, the size, the zoom and what it follows, in a small config
 REQUIREMENTS
 ------------
 
-  - MeitouClient 0.19.0 (the open-source engine that runs Kenshi's game files). The mod is built against that release
-    and has only been used with it. The game refuses to load it on anything older than 0.19.0 or from 0.20.0 on.
+  - MeitouClient 0.20.0 (the open-source engine that runs Kenshi's game files). The mod is built against that release
+    and has only been used with it. The game refuses to load it on anything older than 0.20.0 or from 0.21.0 on.
+    On MeitouClient 0.19.x use TimeLight Map 1.1.0; on 0.17.x use 1.0.0.
   - It does NOT run on stock Kenshi or on RE_Kenshi. Those ignore the code; nothing happens there.
   - Developed and run on the Linux build (Vulkan). Not tried on the Windows build. Not expected to work on the macOS
     (Metal) build.
@@ -42,7 +43,7 @@ INSTALL
   3. Play. Load a save or start a new game: the map is in the top right corner, following your squad.
 
   The game's log output then has the line:
-         mod       timelight-map: TimeLight Map 1.1.0 ready: 7 patches, 0 failed; ...
+         mod       timelight-map: TimeLight Map 1.2.0 ready: 7 patches, 0 failed; ...
 
   (optional) 4. To change the defaults for every start, copy "timelight-map.cfg.sample" from this zip into
      <Kenshi>/mods/TimeLightMap/ under the name "timelight-map.cfg" and edit it. See CONFIG FILE below.
@@ -54,14 +55,14 @@ INSTALL
 THE FILE IS CALLED Meitou.Tests.dll. WHY?
 -----------------------------------------
 
-The map needs parts of the engine that MeitouClient 0.19.0 keeps internal (its renderer and its HUD). The engine
+The map needs parts of the engine that MeitouClient 0.20.0 keeps internal (its renderer and its HUD). The engine
 lets exactly one assembly name see those parts: "Meitou.Tests", the name of its own test project. So the mod's DLL
 carries that name. It contains no tests and nothing of MeitouClient's; it is this mod's own code, and the source is
-in TimeLightMap-1.1.0-source.zip. What this means for you:
+in TimeLightMap-1.2.0-source.zip. What this means for you:
 
-  - The mod is tied to MeitouClient 0.19.0. Internal parts change without notice; a new MeitouClient release may need
-    a new build of this mod. The mod declares the versions it accepts (">=0.19.0 <0.20.0"); outside them the game
-    leaves it out with a notice instead of crashing. On a later 0.19.x a part that no longer fits switches itself off
+  - The mod is tied to MeitouClient 0.20.0. Internal parts change without notice; a new MeitouClient release may need
+    a new build of this mod. The mod declares the versions it accepts (">=0.20.0 <0.21.0"); outside them the game
+    leaves it out with a notice instead of crashing. On a later 0.20.x a part that no longer fits switches itself off
     and says so in the log.
   - If a later MeitouClient closes this door, the mod will need another way in.
   - Another mod that uses the same trick ships a file of the same name in its own folder. By the engine's loader each
@@ -93,6 +94,9 @@ defaults. A line the mod cannot read is skipped and named in the game's log.
                                                                             labels, cone, scale bar, north arrow
   cone     on | off                                            on           the main camera's dotted view cone
   places   on | off                                            on           names of discovered towns and places
+  hidewithui  on | off                                         on           on: the map hides while the game's interface
+                                                                            is hidden (F7, or hud hide in the console)
+                                                                            off: the map stays on screen
 
 Example (a small map bottom left, zoomed out, tilted):
 
@@ -127,6 +131,8 @@ Everyday:
   topcam hostiles off               no red dots for hostile characters;  topcam hostiles on
   topcam pitch 60                   tilt the view (35..90; 90 is straight down);  topcam pitch 60 --over 2  glides there in 2 s
   topcam alpha 0.6                  see-through (0..1);  topcam alpha 0 --over 1  fades it out in 1 s
+  topcam hidewithui off             keep the map on screen when you hide the interface (F7);  topcam hidewithui on
+                                    (the default) hides it along with the interface
   topcam                            the full state as one line of JSON (also: topcam status)
 
 Each command answers with one line saying where the map stands, for example:
@@ -181,8 +187,10 @@ KNOWN LIMITS
     "unexplored" name until you have visited it. Nests and camps are not named. Zoomed out beyond 2 km, only towns.
   - At most 32 squad members are drawn, 40 hostiles and 48 place labels. A label with no free room is not drawn (its
     diamond stays).
-  - The names and labels are part of the game's HUD, so they may disappear with it when you hide the interface; the
-    picture, the dots and the cone do not.
+  - When you hide the game's interface (F7, or hud hide in the console), the whole map hides with it and comes back
+    with it. To keep the map on screen without the interface: topcam hidewithui off (or hidewithui = off in the
+    config file). The map's names and labels are part of the game's HUD, so with hidewithui off they still go
+    away with the interface; the picture, the dots and the cone stay.
   - Console settings are not saved. Only the config file is read at start.
   - If something goes wrong while drawing, the affected part switches itself off and writes one line to the game's log
     ("mod       timelight-map: ..."); the game goes on.  topcam on  /  topcam marks on  try again.
@@ -197,15 +205,17 @@ License as published by the Free Software Foundation, either version 3 of the Li
 version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
 warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The full text is in the file LICENSE.
 
-The complete source code is in TimeLightMap-1.1.0-source.zip, published together with this zip.
+The complete source code is in TimeLightMap-1.2.0-source.zip, published together with this zip.
 
-The mod is built against MeitouClient 0.19.0, which is licensed GPL-3.0-or-later, and patches it at run time with
+The mod is built against MeitouClient 0.20.0, which is licensed GPL-3.0-or-later, and patches it at run time with
 Harmony, which is licensed MIT. Both come with the game; neither is included here. No game data or assets are included.
 
 
 VERSIONS
 --------
 
+1.2.0  Built for MeitouClient 0.20.0 (accepts 0.20.x). New: the map hides when you hide the game's interface
+       (F7 / hud hide) and comes back with it; topcam hidewithui off (or hidewithui = off) keeps the old behaviour.
 1.1.0  Built for MeitouClient 0.19.0 (accepts 0.19.x). The map itself is unchanged.
 1.0.0  First version, built for MeitouClient 0.17.4 (accepts 0.17.4 and later 0.17.x).
 

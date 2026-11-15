@@ -79,15 +79,16 @@ namespace TimeLightMap
         }
 
         /// <summary>The config keys, in the order their commands run: the place and the view first, the marks, 'map' (on / off) last.</summary>
-        static readonly string[] Keys = { "corner", "size", "margin", "follow", "zoom", "pitch", "alpha", "marks", "cone", "places", "map" };
+        static readonly string[] Keys = { "corner", "size", "margin", "follow", "zoom", "pitch", "alpha", "marks", "cone", "places", "hidewithui", "map" };
 
         /// <summary>What the map does with no config file, and what a key missing from the file means.</summary>
-        static readonly string[] Defaults = { "top-right", "medium", "24", "squad", "150", "90", "1", "on", "on", "on", "on" };
+        static readonly string[] Defaults = { "top-right", "medium", "24", "squad", "150", "90", "1", "on", "on", "on", "on", "on" };
 
         /// <summary>
         /// The options as topcam commands, in the order they must run: the built-in defaults with the config file's values over
         /// them. Lines: key = value; '#' starts a comment; keys (any case): map (on|off), corner, size, margin, zoom (metres
-        /// across), follow (squad|camera|off), pitch (35..90), alpha (0..1), marks (on|off), cone (on|off), places (on|off).
+        /// across), follow (squad|camera|off), pitch (35..90), alpha (0..1), marks (on|off), cone (on|off), places (on|off),
+        /// hidewithui (on|off).
         /// Unknown keys and bad lines go to <paramref name="faults"/> and are skipped; the commands themselves refuse bad values
         /// (the built-in default then stands, since it is also the map's initial state). A null or empty text gives the defaults.
         /// </summary>
@@ -161,6 +162,7 @@ namespace TimeLightMap
             + "alpha = 1             # the map's strength: 1 solid, 0.5 half see-through (0..1)\n"
             + "marks = on            # dots, names, labels, scale bar, north arrow\n"
             + "cone = on             # the dotted cone showing where the main camera looks\n"
-            + "places = on           # names of the towns and places you have discovered\n";
+            + "places = on           # names of the towns and places you have discovered\n"
+            + "hidewithui = on       # on: the map hides while the game's interface is hidden (F7, hud hide); off: it stays\n";
     }
 }

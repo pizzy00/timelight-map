@@ -12,3 +12,4 @@ alpha = 1             # the map's strength: 1 solid, 0.5 half see-through (0..1)
 marks = on            # dots, names, labels, scale bar, north arrow
 cone = on             # the dotted cone showing where the main camera looks
 places = on           # names of the towns and places you have discovered
+hidewithui = on       # on: the map hides while the game's interface is hidden (F7, hud hide); off: it stays

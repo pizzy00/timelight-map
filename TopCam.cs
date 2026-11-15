@@ -53,7 +53,7 @@ namespace TimeLightMap
     /// </summary>
     internal static class TopCam
     {
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.0";
 
         // ---- settings (set by commands, read by the render hook; both on the main thread) ----
         // The values here are the state before the options run (MapPrefs.Commands, at the first drawn frame): off, top right.
@@ -74,6 +74,8 @@ namespace TimeLightMap
         public static string Layers = "tofc";       // t terrain, o objects (buildings), f foliage, c characters
         public static readonly ViewTarget Target = new ViewTarget();
         public static string TargetError, FxError;
+        public static bool HideWithUi = true;       // the map hides while the game's interface is hidden (F7, hud hide, the cinema's clean picture)
+        static bool _uiReadBroken;                  // the interface's visibility could not be read: the map no longer hides with it
 
         public const float MinPitch = 35f;
         public const float ObjectEyeHeight = 5200f;     // objects are measured from no higher than this (see DrawTop)
@@ -208,6 +210,25 @@ namespace TimeLightMap
             return On && _shownStamp != 0 && Stopwatch.GetElapsedTime(_shownStamp).TotalSeconds < 0.15;
         }
 
+        /// <summary>Whether the game's interface is hidden now (F7, the console's 'hud hide', the cinema's clean picture): the map
+        /// goes with it unless 'topcam hidewithui off'. PlayerInterface.UiVisible is internal; if a later engine moved it, the read
+        /// fails once, is logged, and the map simply stays on screen.</summary>
+        static bool UiHidden(GameHost host)
+        {
+            if (_uiReadBroken) return false;
+            try { return ReadUiHidden(host); }
+            catch (Exception e)
+            {
+                _uiReadBroken = true;
+                Log.Error("topcam: the interface's visibility could not be read, the map no longer hides with it: " + e.GetType().Name + ": " + e.Message);
+                return false;
+            }
+        }
+
+        // Never inlined: it names an internal member (GameHost.Player), so a missing one fails in here, inside UiHidden's try.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static bool ReadUiHidden(GameHost host) => host.Player is { } player && !player.UiVisible;
+
         static void Frame(GameHost host, int width, int height)
         {
             var gpu = host.Gpu;
@@ -233,12 +254,12 @@ namespace TimeLightMap
 
             // the view of this frame: the eased one is stepped even while the map is faded out, so it comes back in the right place
             var view = NextView(host, gpu, dt, w / (float)h);
-            if (alpha <= 0f)
+            if (alpha <= 0f || (HideWithUi && UiHidden(host)))
             {
                 _wasHidden = true;
                 _moving = false;
                 _shownStamp = 0;
-                return;      // faded out: no top pass, no blit, no labels (MapShown goes false)
+                return;      // faded out, or hidden with the interface: no top pass, no blit, no labels (MapShown goes false)
             }
 
             _moving = (Target.Mode != TargetMode.None || _angleGlide) && _drawn.Valid && !view.Near(_drawn, 0.05, RectW);
@@ -863,7 +884,7 @@ namespace TimeLightMap
         public const string Usage =
             "usage: topcam [on|off | view <cx> <cz> <span> | view follow [span] | rect <x> <y> <w> <h> | yaw <deg> [--over <s>] | pitch <35..90> [--over <s>] | fps <n>"
             + " | scale <x> | exposure auto|<x> | flip none|x|y|xy | layers <tofc> | shadows on|off | fog on|off | haze on|off | wide on|off"
-            + " | alpha <0..1> [--over <s>] | ease <s> | marks on|off | hostiles on|off | textscale <x> | clip on|off"
+            + " | alpha <0..1> [--over <s>] | ease <s> | marks on|off | hostiles on|off | textscale <x> | clip on|off | hidewithui on|off"
             + " | layer [<" + MapLayers.WordList + "|all> on|off ...] | cone [on|off] [reach <0.5..8>] [fill <0..1>] | places on|off"
             + " | " + MapPrefs.Words + " | status]";
 
@@ -1040,6 +1061,10 @@ namespace TimeLightMap
                     if (a.Count != 2) return (false, "usage: topcam wide on|off   (on, the default: draw distances that suit a zoomed-out map; off: the game's own)");
                     Wide = a[1].Equals("on", StringComparison.OrdinalIgnoreCase);
                     break;
+                case "hidewithui":
+                    if (a.Count != 2 || !(Is(1, "on") || Is(1, "off"))) return (false, "usage: topcam hidewithui on|off   (on, the default: the map hides while the game's interface is hidden, F7 or the console's hud hide; off: the map stays on screen)");
+                    HideWithUi = Is(1, "on");
+                    break;
                 case "clip":
                     if (a.Count != 2) return (false, "usage: topcam clip on|off   (on, the default: the game's name tags, task bars, item labels, damage numbers and speech bubbles are kept off the map rect)");
                     MapHud.ClipOn = a[1].Equals("on", StringComparison.OrdinalIgnoreCase);
@@ -1081,6 +1106,7 @@ namespace TimeLightMap
             if (PitchAngle.Target < 90) sb.Append(", pitch ").Append(MapMath.Num(PitchAngle.Target));
             if (YawAngle.Target != 0) sb.Append(", yaw ").Append(MapMath.Num(YawAngle.Target));
             if (_alphaGoal < 1f) sb.Append(", alpha ").Append(MapMath.Num(_alphaGoal, "0.##"));
+            if (!HideWithUi) sb.Append(", stays when the interface is hidden");
             sb.Append(", marks ").Append(Marks.On ? "on" : "off");
             if (Marks.Error != null) sb.Append(" (switched off after an error: ").Append(Marks.Error).Append(')');
             if (Marks.On)
@@ -1096,6 +1122,7 @@ namespace TimeLightMap
             var sb = new StringBuilder(1024);
             sb.Append("{\"on\":").Append(On ? "true" : "false");
             sb.Append(",\"version\":\"").Append(Version).Append('"');
+            sb.Append(",\"hideWithUi\":").Append(HideWithUi ? "true" : "false");
             sb.Append(",\"corner\":").Append(MapMath.JsonText(MapPrefs.CornerName(Corner)));      // null: the rect is 'topcam rect''s
             sb.Append(",\"cornerSize\":").Append(MapMath.Num(CornerSize, "0.#")).Append(",\"cornerMargin\":").Append(CornerMargin.ToString(ci));
             sb.Append(",\"view\":{\"follow\":").Append(Follow ? "true" : "false");
