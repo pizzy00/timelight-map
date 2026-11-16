@@ -86,6 +86,16 @@ static class V130Checks
     {
         MapPrefs.Rect(2, MapPrefs.Medium, 24, 2560, 1440, out int x, out int y, out int w, out int h, round: true);
         Check(w == 498 && h == 498 && x == 2560 - 24 - 498 && y == 24, "round, medium, top right: square " + x + "," + y + " " + w + "x" + h);
+        MapPrefs.FreeSquare(1832, 63, 712, 499, 2560, 1440, out x, out y, out int s);
+        Check(s == 499 && x == 2544 - 499 && y == 63, "round in a wide free rect at the right: the circle keeps to the right edge: " + x + "," + y + " " + s);
+        MapPrefs.FreeSquare(16, 63, 712, 499, 2560, 1440, out x, out y, out s);
+        Check(s == 499 && x == 16 && y == 63, "round in a wide free rect at the left: keeps to the left edge");
+        MapPrefs.FreeSquare(924, 900, 712, 499, 2560, 1440, out x, out y, out s);
+        Check(s == 499 && x == 924 + 106 && y == 900, "round in a wide free rect in the middle: the middle (" + x + ")");
+        MapPrefs.FreeSquare(40, 600, 300, 800, 2560, 1440, out x, out y, out s);
+        Check(s == 300 && x == 40 && y == 600 + 500, "round in a tall free rect at the bottom: keeps to the bottom edge");
+        MapPrefs.FreeSquare(100, 100, 400, 400, 2560, 1440, out x, out y, out s);
+        Check((x, y, s) == (100, 100, 400), "round in a square free rect: unchanged");
         MapPrefs.BigRect(2560, 1440, out x, out y, out w, out h);
         Check(h == 1037 && Math.Abs(w - h * MapPrefs.Aspect) <= 1 && Math.Abs(2 * x + w - 2560) <= 1 && Math.Abs(2 * y + h - 1440) <= 1,
             "big map, 2560x1440: 72% high, in the middle: " + x + "," + y + " " + w + "x" + h);

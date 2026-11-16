@@ -17,7 +17,8 @@ Built against MeitouClient 0.20.0; accepts 0.20.x (also loads on the Windows bui
   key bound in the game's own controls wins (logged once).
 - **Big map.** `topcam big`: the map in the middle of the window, larger and three times wider; again to go back.
 - **Round map** (`shape = round`) with a soft edge; names and labels stay inside the circle, the scale bar and the
-  north arrow move to fit it.
+  north arrow move to fit it. In a corner it keeps the same margin from both edges; in a free `rect` that is not
+  square it takes the shorter side and keeps to the side nearer the window's edge.
 - **Frame** (`frame = on`): a thin two-tone frame round the map, square or round.
 - **Routes.** A dotted line along the path of each selected person to a ring at its end; the part the game has not
   worked out yet is fainter. Layer `route`, key `routes`.
@@ -56,7 +57,7 @@ Built against MeitouClient 0.20.0; accepts 0.20.x (also loads on the Windows bui
   frame; both are made once now.
 - **B7 A free map could not be placed from the config file.** `corner = off` had no rectangle key. Now `corner = free`
   (the old `off` still works) takes the new `rect` key; a rect must be at least 16 x 16 pixels.
-- **B8 The checks were not in the repository.** The console checks of the pure code (1194 of them: corners, sizes,
+- **B8 The checks were not in the repository.** The console checks of the pure code (1199 of them: corners, sizes,
   the config file, the layers, the label and place layouts, routes, the round map, the hotkey words) are in
   `checks/` now; run `dotnet run -c Release` in that folder (exit code 0 = every check passed; no game needed).
 - **B9 Small things.** A stale comment (KnownPlaces pointed at a member that no longer exists); `alpha` was parsed

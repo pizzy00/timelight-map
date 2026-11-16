@@ -256,7 +256,11 @@ namespace TimeLightMap
             else
             {
                 (_mapX, _mapY, _mapW, _mapH) = (RectX, RectY, RectW, RectH);
-                if (Round) _mapW = _mapH = Math.Min(_mapW, _mapH);
+                if (Round)
+                {
+                    MapPrefs.FreeSquare(RectX, RectY, RectW, RectH, width, height, out _mapX, out _mapY, out int side);
+                    _mapW = _mapH = side;
+                }
             }
         }
 

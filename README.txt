@@ -115,6 +115,8 @@ game and type  topcam save file  to write the file from what you see.
                                                                               (small 22, medium 34.6, large 46)
   margin       0..400                                            24           pixels between the map and the window's edges
   rect         x y w h (window pixels)                           24 24 480 336  the map's rectangle, used with corner = free
+                                                                              (round: a circle as high as the shorter side,
+                                                                              kept to the side nearer the window's edge)
   shape        square | round                                    square       round: a circle, the game shows round it
   frame        on | off                                          off          a thin two-tone frame round the map
   follow       squad | selected | camera | off                   squad        squad: your active squad

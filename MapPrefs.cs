@@ -247,6 +247,19 @@ namespace TimeLightMap
             y = Math.Max(0, y);
         }
 
+        /// <summary>A round map in a free rect ('topcam rect', corner = free) that is not square: the square of its shorter side,
+        /// kept to the rect's side nearer the window's edge on each axis (the middle when both gaps are equal), so a wide rect at
+        /// the right of the window puts the circle at its right, with the rect's own margin, not at its left.</summary>
+        public static void FreeSquare(int rx, int ry, int rw, int rh, int winW, int winH, out int x, out int y, out int s)
+        {
+            s = Math.Min(rw, rh);
+            x = rx + Toward(rx, winW - rx - rw, rw - s);
+            y = ry + Toward(ry, winH - ry - rh, rh - s);
+
+            static int Toward(int before, int after, int spare) =>
+                spare <= 0 ? 0 : after < before ? spare : after > before ? 0 : spare / 2;
+        }
+
         /// <summary>The big map: in the middle of the window, <see cref="BigSize"/> percent of its height (the map's shape; round:
         /// as wide as high), never wider than 94% of the window.</summary>
         public static void BigRect(int winW, int winH, out int x, out int y, out int w, out int h, bool round = false)
