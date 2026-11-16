@@ -17,6 +17,8 @@ namespace TimeLightMap
     //   CamPose, ViewCone   the main game camera and its view cone on the ground
     //   Heading      which way each character walks (the arrow on the dot), from where the frames draw them
     //   MapLayers    the marks' layer switches (topcam layer <name> on|off)
+    //   RoutePlan    a walking man's path on the map: legs thinned to whole pixels, one line for a group going the same way
+    //   MapShape     the round map's circle, and how badly hurt a man is (the hurt rings)
     //   CaptionText  a plain text as a HUD caption
     //   PlaceLayout  where the place labels' texts go so that nothing covers anything else
     //   KnownPlaces  which of the game's towns and places get a label, and under which name
@@ -283,6 +285,7 @@ namespace TimeLightMap
     {
         public TargetMode Mode;
         public double FollowSpan = 3000;                        // the world width across the picture while following
+        public double SpanFactor = 1;                           // the big map shows this many times FollowSpan (it glides there)
         public double Ease = 0.5;                               // seconds (see Spring)
 
         public const double MinSpan = 20, MaxSpan = 60000;
@@ -339,7 +342,7 @@ namespace TimeLightMap
             else if (cold) WaitingForPoint = true;
             // with nobody to follow the view holds where it is
             double aimX = _havePoint ? _pointX : _cx.Value, aimZ = _havePoint ? _pointZ : _cz.Value;
-            double aimSpan = Math.Clamp(FollowSpan, MinSpan, MaxSpan);
+            double aimSpan = Math.Clamp(FollowSpan * (SpanFactor > 0 ? SpanFactor : 1), MinSpan, MaxSpan);
             (AimCx, AimCz, AimSpan) = (aimX, aimZ, aimSpan);
             double logAim = Math.Log(aimSpan);
             if (cold || cut)
@@ -786,22 +789,32 @@ namespace TimeLightMap
     }
 
     /// <summary>The marks' layers, each switched on and off on its own (topcam layer &lt;name&gt; on|off). All on by default.
-    /// names: the squad's names; foes: the red dots of hostile characters; towns: the names of discovered towns and
-    /// places; cone: the main camera's view cone; arrows: the heading arrows on walking squad members; scale: the scale
-    /// bar; north: the N arrow. The squad's dots themselves have no switch.</summary>
+    /// names: your people's names; foes: the red dots of hostile characters; towns: the names of discovered towns and
+    /// places; cone: the main camera's view cone; arrows: the heading arrows on walking people; scale: the scale bar;
+    /// north: the N arrow; route: where the selected people walk to; hurt: a ring on anyone badly hurt. The dots of your
+    /// people themselves have no switch. Other words: hostiles (foes), places (towns), routes / waypoints (route), health (hurt).</summary>
     internal static class MapLayers
     {
-        public const int Names = 0, Foes = 1, Towns = 2, Cone = 3, Arrows = 4, Scale = 5, North = 6, Count = 7;
+        public const int Names = 0, Foes = 1, Towns = 2, Cone = 3, Arrows = 4, Scale = 5, North = 6, Route = 7, Hurt = 8, Count = 9;
         public const int All = (1 << Count) - 1;
-        public static readonly string[] Words = { "names", "foes", "towns", "cone", "arrows", "scale", "north" };
-        public const string WordList = "names|foes|towns|cone|arrows|scale|north";
+        public static readonly string[] Words = { "names", "foes", "towns", "cone", "arrows", "scale", "north", "route", "hurt" };
+        public const string WordList = "names|foes|towns|cone|arrows|scale|north|route|hurt";
 
         public static bool On(int mask, int layer) => (mask & (1 << layer)) != 0;
 
-        /// <summary>A layer's name (any case; the singular too: name, foe, town, arrow). -1: none.</summary>
+        public static int Set(int mask, int layer, bool on) => on ? mask | (1 << layer) : mask & ~(1 << layer);
+
+        /// <summary>A layer's name (any case; the singular too: name, foe, town, arrow; and the other words). -1: none.</summary>
         public static int Index(string word)
         {
             if (string.IsNullOrEmpty(word)) return -1;
+            switch (word.ToLowerInvariant())
+            {
+                case "hostiles": case "hostile": return Foes;
+                case "places": case "place": return Towns;
+                case "routes": case "waypoints": case "waypoint": case "paths": case "path": return Route;
+                case "health": return Hurt;
+            }
             for (int i = 0; i < Words.Length; i++)
             {
                 string w = Words[i];
@@ -821,10 +834,7 @@ namespace TimeLightMap
             int m = mask;
             for (int i = from; i < a.Count; i += 2)
             {
-                bool on;
-                if (a[i + 1].Equals("on", StringComparison.OrdinalIgnoreCase)) on = true;
-                else if (a[i + 1].Equals("off", StringComparison.OrdinalIgnoreCase)) on = false;
-                else return "topcam layer: on or off after '" + a[i] + "', not '" + a[i + 1] + "'";
+                if (!MapPrefs.OnOff(a[i + 1], out bool on)) return "topcam layer: on or off after '" + a[i] + "', not '" + a[i + 1] + "'";
                 if (a[i].Equals("all", StringComparison.OrdinalIgnoreCase))
                 {
                     m = on ? All : 0;
@@ -832,7 +842,7 @@ namespace TimeLightMap
                 }
                 int k = Index(a[i]);
                 if (k < 0) return "topcam layer: no layer '" + a[i] + "' (" + WordList + ", all)";
-                m = on ? m | (1 << k) : m & ~(1 << k);
+                m = Set(m, k, on);
             }
             result = m;
             return null;
@@ -890,6 +900,9 @@ namespace TimeLightMap
         public const int Rings = 4;
         public const float LeadFrom = 6f;       // a text this far (or more) off its usual spot gets a leader line
 
+        /// <summary>A round map: above 0, every text stays inside this circle round the picture's middle (pixels).</summary>
+        public float CircleR;
+
         // obstacles (x0, y0, x1, y1), set each frame
         public int Obstacles;
         public readonly float[] OX0 = new float[MaxObstacles], OY0 = new float[MaxObstacles], OX1 = new float[MaxObstacles], OY1 = new float[MaxObstacles];
@@ -908,6 +921,14 @@ namespace TimeLightMap
         Dictionary<long, int> _prev = new Dictionary<long, int>(), _next = new Dictionary<long, int>();
         readonly int[] _order = new int[Max];
         readonly float[] _px0 = new float[Max], _py0 = new float[Max], _px1 = new float[Max], _py1 = new float[Max];
+        readonly Comparer<int> _byPriority;
+
+        // the rings' directions: up, down, the four diagonals, right, left (up and down first: a text reads best over or under its mark)
+        static readonly float[] RingX = { 0f, 0f, 0.7071f, -0.7071f, 0.7071f, -0.7071f, 1f, -1f };
+        static readonly float[] RingY = { -1f, 1f, -0.7071f, -0.7071f, 0.7071f, 0.7071f, 0f, 0f };
+
+        public PlaceLayout() =>
+            _byPriority = Comparer<int>.Create((a, b) => Priority[a] != Priority[b] ? Priority[b].CompareTo(Priority[a]) : a.CompareTo(b));
 
         public void ClearObstacles() => Obstacles = 0;
 
@@ -932,17 +953,15 @@ namespace TimeLightMap
                 case 3: (x, y) = (ax - above - 2f - w, ay - h * 0.5f); return;
             }
             int k = s - 4, ring = k / 8 + 1, dir = k % 8;
-            // up, down, the four diagonals, right, left: up and down first (a text reads best over or under its mark)
-            float[] dx = { 0f, 0f, 0.7071f, -0.7071f, 0.7071f, -0.7071f, 1f, -1f };
-            float[] dy = { -1f, 1f, -0.7071f, -0.7071f, 0.7071f, 0.7071f, 0f, 0f };
             float r = ring * Step;
-            float cx = ax + dx[dir] * (r + w * 0.5f + above), cy = ay + dy[dir] * (r + h * 0.5f + above);
+            float cx = ax + RingX[dir] * (r + w * 0.5f + above), cy = ay + RingY[dir] * (r + h * 0.5f + above);
             (x, y) = (cx - w * 0.5f, cy - h * 0.5f);
         }
 
         bool Free(float x0, float y0, float x1, float y1, int placed, float rw, float rh)
         {
             if (x0 < Edge || y0 < Edge || x1 > rw - Edge || y1 > rh - Edge) return false;
+            if (CircleR > 0 && !MapShape.BoxInCircle(x0, y0, x1, y1, rw * 0.5f, rh * 0.5f, CircleR - Edge)) return false;
             float a0 = x0 - Pad, b0 = y0 - Pad, a1 = x1 + Pad, b1 = y1 + Pad;
             for (int o = 0; o < Obstacles; o++)
                 if (a0 < OX1[o] && OX0[o] < a1 && b0 < OY1[o] && OY0[o] < b1) return false;
@@ -955,7 +974,7 @@ namespace TimeLightMap
         {
             int n = Math.Min(Count, Max);
             for (int i = 0; i < n; i++) _order[i] = i;
-            Array.Sort(_order, 0, n, Comparer<int>.Create((a, b) => Priority[a] != Priority[b] ? Priority[b].CompareTo(Priority[a]) : a.CompareTo(b)));
+            Array.Sort(_order, 0, n, _byPriority);
             _next.Clear();
             int placed = 0;
             Dropped = 0;
@@ -1015,7 +1034,7 @@ namespace TimeLightMap
     /// Which of the game's own towns and places get a label on the map, and under which name: the rules of the game's own
     /// world map. A place shows once the player has discovered it; until it has been explored it goes by its "unexplored"
     /// name when the game data gives one. Zoomed far out only towns are named, so the map does not fill with small places.
-    /// The game side (Marks.KnownPlaces) reads the placed towns and the player's knowledge of them and asks here.
+    /// The game side (Marks.GamePlaces) reads the placed towns and the player's knowledge of them and asks here.
     /// </summary>
     internal static class KnownPlaces
     {
@@ -1040,6 +1059,111 @@ namespace TimeLightMap
         {
             double reach = Math.Max(v.Span, v.SpanZ / Math.Max(v.SinPitch, 0.05));
             return Math.Abs(x - v.Cx) <= reach && Math.Abs(z - v.Cz) <= reach;
+        }
+    }
+
+    /// <summary>
+    /// A walking man's path on the map (the "route" layer): the picture points of his path, from where the frame draws him to
+    /// the path's end, thinned so that no leg is shorter than <see cref="MinStep"/> pixels (the end itself is always kept) and
+    /// no route has more than <see cref="MaxLegs"/> legs (past that the last leg runs straight to the end). Men walking together
+    /// have near the same path: a route that ends within <see cref="SameEnd"/> pixels of a route already drawn this frame, and
+    /// starts within <see cref="SameStart"/> of it, is the same route and is not drawn again. Per frame: BeginFrame; per man:
+    /// Start, Add each point, Finish (true: draw X/Y[0..Count)). No allocation.
+    /// </summary>
+    internal sealed class RoutePlan
+    {
+        public const float MinStep = 6f, SameEnd = 12f, SameStart = 40f;
+        public const int MaxLegs = 24, MaxRoutes = 16;
+
+        public readonly float[] X = new float[MaxLegs + 1], Y = new float[MaxLegs + 1];
+        public readonly bool[] Far = new bool[MaxLegs + 1];      // the leg that ends at this point is on the provisional, long-range part
+        public int Count;
+        public int Routes, Skipped;
+
+        readonly float[] _sx = new float[MaxRoutes], _sy = new float[MaxRoutes], _ex = new float[MaxRoutes], _ey = new float[MaxRoutes];
+        float _pendX, _pendY;
+        bool _pend, _pendFar;
+
+        public void BeginFrame() => Routes = Skipped = 0;
+
+        public void Start(float x, float y)
+        {
+            Count = 0;
+            _pend = false;
+            if (!float.IsFinite(x) || !float.IsFinite(y)) return;
+            (X[0], Y[0], Far[0], Count) = (x, y, false, 1);
+        }
+
+        public void Add(float x, float y, bool far)
+        {
+            if (Count == 0 || !float.IsFinite(x) || !float.IsFinite(y)) return;
+            float dx = x - X[Count - 1], dy = y - Y[Count - 1];
+            if (dx * dx + dy * dy < MinStep * MinStep)
+            {
+                (_pendX, _pendY, _pendFar, _pend) = (x, y, far, true);      // kept only if it turns out to be the end
+                return;
+            }
+            Put(x, y, far);
+        }
+
+        void Put(float x, float y, bool far)
+        {
+            _pend = false;
+            if (Count >= MaxLegs + 1) Count = MaxLegs;      // full: the last point moves on (the end is what matters)
+            (X[Count], Y[Count], Far[Count]) = (x, y, far);
+            Count++;
+        }
+
+        /// <summary>True: draw this route (it has a leg and is not one already drawn this frame).</summary>
+        public bool Finish()
+        {
+            if (_pend && Count > 0) Put(_pendX, _pendY, _pendFar);
+            if (Count < 2) return false;
+            float ex = X[Count - 1], ey = Y[Count - 1];
+            for (int i = 0; i < Routes; i++)
+            {
+                if (Near(ex, ey, _ex[i], _ey[i], SameEnd) && Near(X[0], Y[0], _sx[i], _sy[i], SameStart))
+                {
+                    Skipped++;
+                    return false;
+                }
+            }
+            if (Routes < MaxRoutes)
+            {
+                (_sx[Routes], _sy[Routes], _ex[Routes], _ey[Routes]) = (X[0], Y[0], ex, ey);
+                Routes++;
+            }
+            return true;
+        }
+
+        static bool Near(float ax, float ay, float bx, float by, float d) => (ax - bx) * (ax - bx) + (ay - by) * (ay - by) <= d * d;
+    }
+
+    /// <summary>The round map's circle, and the hurt rings' levels.</summary>
+    internal static class MapShape
+    {
+        public const double Hurt = 0.6, BadlyHurt = 0.3;
+
+        /// <summary>The round map's radius on a picture w x h (the circle that fits, half a pixel in).</summary>
+        public static float Radius(float w, float h) => MathF.Max(0f, MathF.Min(w, h) * 0.5f - 0.5f);
+
+        /// <summary>Whether a box lies wholly inside the circle (all four corners).</summary>
+        public static bool BoxInCircle(float x0, float y0, float x1, float y1, float cx, float cy, float r)
+        {
+            if (!(r > 0)) return false;
+            float r2 = r * r;
+            float ax = x0 - cx, bx = x1 - cx, ay = y0 - cy, by = y1 - cy;
+            return ax * ax + ay * ay <= r2 && bx * bx + ay * ay <= r2 && ax * ax + by * by <= r2 && bx * bx + by * by <= r2;
+        }
+
+        /// <summary>How badly hurt a man is, from his blood (0..1 of capacity) and his worst body part (a fraction of its most
+        /// HP; below 0 when it is wrecked): 0 not much, 1 hurt (under 0.6), 2 badly hurt (under 0.3). An unknown value counts as
+        /// whole.</summary>
+        public static int HurtLevel(double blood, double worstPart)
+        {
+            double b = double.IsFinite(blood) ? blood : 1, w = double.IsFinite(worstPart) ? worstPart : 1;
+            double health = Math.Clamp(Math.Min(b, w), 0, 1);
+            return health < BadlyHurt ? 2 : health < Hurt ? 1 : 0;
         }
     }
 }

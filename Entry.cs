@@ -8,10 +8,11 @@
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License (the LICENSE file)
 // for more details.
 //
-// A code mod for MeitouClient 0.20.0. It draws a live 3D view of the world from above in a corner of the game window
-// (TopCam.cs), with marks on it (Marks.cs): the squad's dots and names, hostile characters, discovered towns and places,
-// the main camera's view cone, a scale bar and a north arrow. One console command, 'topcam', and one optional config
-// file, timelight-map.cfg in the mod's folder (MapPrefs.cs). The view arithmetic and the label layout are in MapMath.cs.
+// A code mod for MeitouClient 0.20.x. It draws a live 3D view of the world from above in a corner of the game window
+// (TopCam.cs), with marks on it (Marks.cs): your people's dots and names, where the selected ones walk, who is badly hurt,
+// hostile characters, discovered towns and places, the main camera's view cone, a scale bar and a north arrow. Options:
+// the game's Settings > Mods page, an optional config file (timelight-map.cfg in the mod's folder), the console command
+// 'topcam' and four hotkeys (Settings.cs, MapPrefs.cs). The view arithmetic and the label layouts are in MapMath.cs.
 using System;
 using HarmonyLib;
 using Meitou.Game.DevTools;
@@ -26,13 +27,13 @@ namespace TimeLightMap
         public void Initialize(ModContext context)
         {
             Log.Bind(context.Id);
-            try { LoadMapPrefs(context.Folder); } catch (Exception e) { Log.Error(MapPrefs.FileName + " not read: " + e.Message); }
+            try { StartOptions(context); } catch (Exception e) { Log.Error("the map's options were not read: " + e.Message); }
             Patches.Apply(context.Harmony, context.Id);
         }
 
-        // Never inlined: TopCam names internal game types, so a refused type would fail in here, inside the caller's try.
+        // Never inlined: the options name internal game types, so a refused type would fail in here, inside the caller's try.
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        static void LoadMapPrefs(string folder) => TopCam.LoadPrefs(folder);
+        static void StartOptions(ModContext context) => MapOptions.Start(context);
     }
 
     internal static class Log
@@ -109,6 +110,9 @@ namespace TimeLightMap
                     new HarmonyMethod(typeof(MapHud), nameof(MapHud.SpeechPostfix)), null, null);
             });
 
+            // The map's hotkeys: the keys the game leaves (after the console, the windows and the interface took theirs).
+            Try("GameLoop.GameKey (the map's hotkeys)", HotkeyPatch.Apply(harmony));
+
             // The game's own world-anchored HUD pieces stay off the map rectangle (name tags, task bars, item labels, damage numbers).
             foreach (var (typeName, method) in new[]
                      {
@@ -125,8 +129,9 @@ namespace TimeLightMap
                 });
             }
 
-            Log.Info("TimeLight Map " + TopCam.Version + " ready: " + ok + " patches, " + failed + " failed; console command: topcam; options: "
-                     + MapPrefs.FileName + " in the mod's folder");
+            Log.Info("TimeLight Map " + TopCam.Version + " ready: " + ok + " patches, " + failed + " failed; options: Settings > Mods, "
+                     + MapPrefs.FileName + " in the mod's folder, or the console command topcam; hotkeys (default): N show/hide, Shift+N big map, "
+                     + "= zoom in, - zoom out");
         }
     }
 }

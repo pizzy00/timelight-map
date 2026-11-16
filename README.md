@@ -1,17 +1,19 @@
 # TimeLight Map
 
 A live 3D map in a corner of your Kenshi game window that follows your squad. It is the game world itself, rendered a
-second time from above, with your people as named dots, hostiles as red dots, discovered town names, a dotted cone for
-where your camera looks, a scale bar and a north arrow.
+second time from above, with your people as named dots, the routes your selected people walk, rings on the hurt,
+hostiles as red dots, discovered town names, a dotted cone for where your camera looks, a scale bar and a north arrow.
 
-You set the corner, size, zoom and follow in a small config file or in the game's console (`topcam ...`).
-Since 1.2.0 the map hides when you hide the game's interface (F7 / `hud hide`); `topcam hidewithui off` keeps it on screen.
+Set it up on the game's settings page (Settings > Mods > TimeLight Map), with hotkeys while you play (N show/hide,
+Shift+N big map, `=` / `-` zoom), in a small config file, or in the game's console (`topcam ...`).
+New in 1.3.0: the settings page, hotkeys, a big map, a round map, a frame, routes, hurt rings, follow selected,
+quality presets and `topcam save`; see the [CHANGELOG](CHANGELOG.md).
 
 - **Download:** [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3839458940), [Nexus Mods](https://www.nexusmods.com/kenshi/mods/2285), or the zip under [Releases](../../releases)
-- **Needs:** [MeitouClient](https://github.com/VlcekM/MeitouClient) 0.20.x (TimeLight Map 1.2.0). On MeitouClient 0.19.x use
+- **Needs:** [MeitouClient](https://github.com/VlcekM/MeitouClient) 0.20.x (TimeLight Map 1.3.0). On MeitouClient 0.19.x use
   [1.1.0](../../releases/tag/v1.1.0), on 0.17.x use [1.0.0](../../releases/tag/v1.0.0). It does not run on stock Kenshi or RE_Kenshi.
-  Developed and tested on the Linux (Vulkan) build; the Windows build is untried.
-- **Install, config keys, console commands, known limits:** [README.txt](README.txt)
+  Developed on the Linux (Vulkan) build; 1.3.0 also loads on the Windows build of 0.20.1.
+- **Install, hotkeys, settings, config keys, console commands, known limits:** [README.txt](README.txt) · **Changes:** [CHANGELOG.md](CHANGELOG.md)
 - **Building from source:** [BUILDING.txt](BUILDING.txt)
 - **License:** GPL-3.0-or-later ([LICENSE](LICENSE)). Uses Harmony (MIT), shipped with MeitouClient.
 

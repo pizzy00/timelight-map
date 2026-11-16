@@ -38,8 +38,10 @@ namespace TimeLightMap
     /// With marks on or the map faded ('alpha' below 1) a second program does the copy: the same picture, the marks' shapes
     /// drawn over it in the fragment shader (Marks), alpha blended. A failure of that program leaves the plain copy.
     ///
-    /// The view: 'topcam view' sets one at once (a cut); 'topcam follow squad' has the mod keep the view on the squad,
-    /// which it eases towards every frame (ViewTarget) and redraws every frame it moves.
+    /// The view: 'topcam view' sets one at once (a cut); 'topcam follow squad' (or 'selected') has the mod keep the view on
+    /// the active squad (or the selected people), which it eases towards every frame (ViewTarget) and redraws while it moves
+    /// (every frame, or at most 'movefps' times a second). 'topcam big' shows the map in the middle of the window, wider.
+    /// 'topcam shape round' makes it a circle and 'topcam frame on' draws a frame round it, both in the marks' program.
     ///
     /// Hooks: a prefix on TerrainRenderer.Draw keeps the main view's light and options of the frame; a postfix on
     /// GameHost.DrawFrame (after WorldFrame.Draw returned and the ahead tick ended) draws. All of it, the commands and the HUD
@@ -53,7 +55,7 @@ namespace TimeLightMap
     /// </summary>
     internal static class TopCam
     {
-        public const string Version = "1.2.0";
+        public const string Version = "1.3.0";
 
         // ---- settings (set by commands, read by the render hook; both on the main thread) ----
         // The values here are the state before the options run (MapPrefs.Commands, at the first drawn frame): off, top right.
@@ -75,6 +77,11 @@ namespace TimeLightMap
         public static readonly ViewTarget Target = new ViewTarget();
         public static string TargetError, FxError;
         public static bool HideWithUi = true;       // the map hides while the game's interface is hidden (F7, hud hide, the cinema's clean picture)
+        public static bool Round;                   // a circle (the rect made square, the corners see-through)
+        public static bool FrameOn;                 // a thin two-tone frame round the map
+        public static bool BigOn;                   // the big map: in the middle of the window, BigZoom times wider
+        public static float MoveFps;                // a moving map is drawn at most this often (0: every frame)
+        public static FollowWho Who = FollowWho.Squad;      // whom 'follow squad' / 'follow selected' keeps the map on
         static bool _uiReadBroken;                  // the interface's visibility could not be read: the map no longer hides with it
 
         public const float MinPitch = 35f;
@@ -86,7 +93,7 @@ namespace TimeLightMap
         static int _width, _height;
         static LegacyProgram _blit, _full;
         static SamplerSlot _sTop, _sAdapted, _fsTop, _fsAdapted;
-        static UniformHandle _uExposure, _uAuto, _uFlip, _fuExposure, _fuAuto, _fuFlip, _fuMarkRect, _fuPal, _fuShape;
+        static UniformHandle _uExposure, _uAuto, _uFlip, _fuExposure, _fuAuto, _fuFlip, _fuMarkRect, _fuPal, _fuShape, _fuLook;
         static int _palVersion = -1;
 
         // The simple options (MapPrefs): the map kept in a corner of the window whatever the window's size, and the config file
@@ -95,6 +102,9 @@ namespace TimeLightMap
         public static int CornerMargin = MapPrefs.DefaultMargin;
         static List<string[]> _prefs;                               // the options as commands, run at the first drawn frame
         static string _prefsFrom = "the built-in defaults";
+        static IReadOnlyDictionary<string, string> _startValues;    // the options the map started with ('topcam reset')
+        static readonly System.Collections.Concurrent.ConcurrentQueue<string[]> Pending = new System.Collections.Concurrent.ConcurrentQueue<string[]>();
+        static int _mapX, _mapY, _mapW = 480, _mapH = 336;          // the map's rect this frame (corner, big or free), window pixels
         static bool _holdFirstView;                                 // 'follow off' before anything was drawn: stay where the first frame looks
         static bool _fullBroken;
         static GpuSampler _linear;
@@ -105,7 +115,7 @@ namespace TimeLightMap
         static readonly Func<float, float, float> FlatGround = (x, z) => 0f;
         static readonly BlendState Fade = new BlendState(true, BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha,
             AlphaSrc: BlendingFactor.Zero, AlphaDst: BlendingFactor.One);      // the picture's own alpha is left as it was
-        static double _nextDraw, _lastStep = -1;
+        static double _nextDraw, _nextMove, _lastStep = -1;
         static WorldLighting _light;
         static WorldRenderOptions _mainOptions;
         static long _lightFrame = -1, _frame;
@@ -141,6 +151,7 @@ namespace TimeLightMap
             Host = __instance;
             _frame++;
             if (_prefs != null) RunPrefs();
+            while (Pending.TryDequeue(out var words)) RunQueued(words);
             if (!On)
             {
                 if (_colour != null) FreeTargets();
@@ -158,29 +169,36 @@ namespace TimeLightMap
             }
         }
 
-        /// <summary>The map's options (MapPrefs: map, corner, size, margin, zoom, follow, pitch, alpha, marks, cone, places):
-        /// the built-in defaults, with the values of &lt;mod folder&gt;/timelight-map.cfg over them when that file is there.
-        /// With no file the map is simply on, in the top right corner, following the squad. The options are applied as
-        /// topcam commands at the first drawn frame (the commands need the running game).</summary>
-        public static void LoadPrefs(string folder)
+        /// <summary>The options the map starts with (MapOptions.Start: the built-in defaults, the config file over them, the
+        /// settings page's saved values over that), applied as topcam commands at the first drawn frame (the commands need the
+        /// running game). <paramref name="from"/>: where they came from, for the log.</summary>
+        public static void StartWith(IReadOnlyDictionary<string, string> values, string from)
         {
-            string text = null;
+            _startValues = values;
+            _prefsFrom = from;
+            _prefs = MapPrefs.Commands(values);
+        }
+
+        /// <summary>'topcam reset': the options the map started with, again.</summary>
+        static void Reset()
+        {
+            if (_startValues != null) _prefs = MapPrefs.Commands(_startValues);
+        }
+
+        /// <summary>Commands for the render hook to run at the next frame (the settings page's changes; any thread).</summary>
+        public static void Queue(IEnumerable<string[]> commands)
+        {
+            foreach (var words in commands) Pending.Enqueue(words);
+        }
+
+        static void RunQueued(string[] words)
+        {
             try
             {
-                if (!string.IsNullOrEmpty(folder))
-                {
-                    string path = System.IO.Path.Combine(folder, MapPrefs.FileName);
-                    if (System.IO.File.Exists(path))
-                    {
-                        text = System.IO.File.ReadAllText(path);
-                        _prefsFrom = MapPrefs.FileName;
-                    }
-                }
+                var r = Command(words);
+                if (!r.Ok) Log.Error("setting: topcam " + string.Join(" ", words) + ": " + r.Text);
             }
-            catch (Exception e) { Log.Error(MapPrefs.FileName + " not read, the defaults are used: " + e.Message); }
-            var list = MapPrefs.Commands(text, out var faults);
-            foreach (string f in faults) Log.Error(MapPrefs.FileName + ": " + f);
-            _prefs = list;
+            catch (Exception e) { Log.Error("setting: topcam " + string.Join(" ", words) + ": " + e.Message); }
         }
 
         static void RunPrefs()
@@ -194,9 +212,9 @@ namespace TimeLightMap
                 {
                     var r = Command(words);
                     if (r.Ok) ok++;
-                    else Log.Error(MapPrefs.FileName + ": " + string.Join(" ", words) + ": " + r.Text);
+                    else Log.Error("option: topcam " + string.Join(" ", words) + ": " + r.Text);
                 }
-                catch (Exception e) { Log.Error(MapPrefs.FileName + ": " + string.Join(" ", words) + ": " + e.Message); }
+                catch (Exception e) { Log.Error("option: topcam " + string.Join(" ", words) + ": " + e.Message); }
             }
             Log.Info("map options from " + _prefsFrom + ": " + ok + " of " + list.Count + " applied; " + Summary());
         }
@@ -229,11 +247,25 @@ namespace TimeLightMap
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         static bool ReadUiHidden(GameHost host) => host.Player is { } player && !player.UiVisible;
 
+        /// <summary>The map's rect this frame (window pixels, origin top left): the big map in the middle of the window, else
+        /// the corner's, else the free rect ('topcam rect'); a round map's is square.</summary>
+        static void MapRect(int width, int height)
+        {
+            if (BigOn) MapPrefs.BigRect(width, height, out _mapX, out _mapY, out _mapW, out _mapH, Round);
+            else if (Corner != 0) MapPrefs.Rect(Corner, CornerSize, CornerMargin, width, height, out _mapX, out _mapY, out _mapW, out _mapH, Round);
+            else
+            {
+                (_mapX, _mapY, _mapW, _mapH) = (RectX, RectY, RectW, RectH);
+                if (Round) _mapW = _mapH = Math.Min(_mapW, _mapH);
+            }
+        }
+
         static void Frame(GameHost host, int width, int height)
         {
             var gpu = host.Gpu;
             if (gpu == null || gpu.Terrain == null) return;
-            if (Corner != 0) MapPrefs.Rect(Corner, CornerSize, CornerMargin, width, height, out RectX, out RectY, out RectW, out RectH);
+            (_winW, _winH) = (width, height);
+            MapRect(width, height);
             var chain = gpu.PostChain;
             if (chain == null) return;
             var ctx = chain.Context;
@@ -247,7 +279,7 @@ namespace TimeLightMap
             _lastStep = now;
             float alpha = StepAlpha(now);
 
-            int w = Math.Clamp((int)MathF.Round(RectW * Scale), 16, 4096), h = Math.Clamp((int)MathF.Round(RectH * Scale), 16, 4096);
+            int w = Math.Clamp((int)MathF.Round(_mapW * Scale), 16, 4096), h = Math.Clamp((int)MathF.Round(_mapH * Scale), 16, 4096);
             bool marks = Marks.On && alpha > 0f;
             if (Target.Mode == TargetMode.Follow || marks) ReadPack(host);
             else if (Pack.Count > 0) Pack.Clear();
@@ -262,10 +294,13 @@ namespace TimeLightMap
                 return;      // faded out, or hidden with the interface: no top pass, no blit, no labels (MapShown goes false)
             }
 
-            _moving = (Target.Mode != TargetMode.None || _angleGlide) && _drawn.Valid && !view.Near(_drawn, 0.05, RectW);
-            if (_colour == null || w != _width || h != _height || now >= _nextDraw || _moving || _wasHidden || !_drawn.Valid)
+            // a still map is drawn 'fps' times a second; a moving one every frame, or at most 'movefps' times a second
+            _moving = (Target.Mode != TargetMode.None || _angleGlide) && _drawn.Valid && !view.Near(_drawn, 0.05, _mapW);
+            if (_colour == null || w != _width || h != _height || now >= _nextDraw || _wasHidden || !_drawn.Valid
+                || (_moving && (MoveFps <= 0f || now >= _nextMove)))
             {
                 _nextDraw = now + 1.0 / Math.Clamp(Fps, 0.2f, 240f);
+                if (MoveFps > 0f) _nextMove = now + 1.0 / Math.Clamp(MoveFps, 0.2f, 240f);
                 long t0 = Stopwatch.GetTimestamp();
                 EnsureTargets(ctx, w, h);
                 DrawTop(ctx, gpu, host, view);
@@ -278,8 +313,8 @@ namespace TimeLightMap
 
             // the rect in window pixels, clipped to the output
             int outW = Math.Min(width, picture.Desc.Width), outH = Math.Min(height, picture.Desc.Height);
-            int x = Math.Clamp(RectX, 0, Math.Max(outW - 1, 0)), rw = Math.Clamp(RectW, 1, Math.Max(outW - x, 1));
-            int top = Math.Clamp(RectY, 0, Math.Max(outH - 1, 0)), rh = Math.Clamp(RectH, 1, Math.Max(outH - top, 1));
+            int x = Math.Clamp(_mapX, 0, Math.Max(outW - 1, 0)), rw = Math.Clamp(_mapW, 1, Math.Max(outW - x, 1));
+            int top = Math.Clamp(_mapY, 0, Math.Max(outH - 1, 0)), rh = Math.Clamp(_mapH, 1, Math.Max(outH - top, 1));
 
             // the marks of this frame, in the view the picture was drawn with (with the main camera of this same frame, for
             // the view cone, and the game clock as this frame draws it, for the heading arrows)
@@ -292,7 +327,7 @@ namespace TimeLightMap
                 try { clock = GameSeconds(host); } catch { }
                 try
                 {
-                    Marks.Build(host, gpu.Terrain, _drawn, x, top, rw, rh, alpha, cam, clock);
+                    Marks.Build(host, gpu.Terrain, _drawn, x, top, rw, rh, alpha, cam, clock, Round);
                     shapes = Marks.ShapeCount;
                 }
                 catch (Exception e)
@@ -302,7 +337,7 @@ namespace TimeLightMap
             }
 
             long t1 = Stopwatch.GetTimestamp();
-            bool full = (shapes > 0 || alpha < 1f) && !_fullBroken;
+            bool full = (shapes > 0 || alpha < 1f || Round || FrameOn) && !_fullBroken;
             try
             {
                 Blit(ctx, gpu, picture, x, outH - (top + rh), rw, rh, full, full ? alpha : 1f, full ? shapes : 0);
@@ -325,7 +360,7 @@ namespace TimeLightMap
         {
             try
             {
-                Pack.Read(host);
+                Pack.Read(host, Who);
             }
             catch (Exception e)
             {
@@ -367,8 +402,9 @@ namespace TimeLightMap
             };
         }
 
-        /// <summary>The view to draw this frame: the squad follow's eased view (ViewTarget), else the plain settings (the main
-        /// camera's target while 'follow camera', else the fixed centre).</summary>
+        /// <summary>The view to draw this frame: the follow's eased view (ViewTarget), else the plain settings (the main
+        /// camera's target while 'follow camera', else the fixed centre). The big map shows <see cref="MapPrefs.BigZoom"/> times
+        /// the width (the follow glides there).</summary>
         static MapView NextView(GameHost host, WorldGpu gpu, double dt, float aspect)
         {
             var v = new MapView { FlipX = FlipX, FlipY = FlipY };
@@ -388,7 +424,7 @@ namespace TimeLightMap
                     eased = true;
                     if (Target.WaitingForPoint && host.Camera != null)
                     {
-                        // nobody to follow yet (no living squad member): look where the main camera looks until there is
+                        // nobody to follow yet (none of your people alive): look where the main camera looks until there is
                         var look = host.Camera.Target;
                         (cx, cz) = (look.X, look.Z);
                     }
@@ -406,6 +442,7 @@ namespace TimeLightMap
                 // 'follow off' was asked before anything was drawn: this first view is where the map stays
                 if (_holdFirstView) (Cx, Cz, _holdFirstView) = (target.X, target.Z, false);
             }
+            if (!eased && BigOn) span *= MapPrefs.BigZoom;
             span = Math.Clamp(span, 20, 60000);
             float ground = gpu.Terrain.HeightAt((float)cx, (float)cz);
             if (!float.IsFinite(ground)) ground = 0;
@@ -415,10 +452,12 @@ namespace TimeLightMap
             return v;
         }
 
-        /// <summary>The squad follow ends where the view stands (as if 'topcam view' had been sent with the view on screen).</summary>
+        /// <summary>The follow ends where the view stands (as if 'topcam view' had been sent with the view on screen; the big
+        /// map's wider view taken back to the normal width).</summary>
         static void TargetOff()
         {
-            if (Target.Mode != TargetMode.None && _drawn.Valid) (Cx, Cz, Span, Follow) = ((float)_drawn.Cx, (float)_drawn.Cz, (float)_drawn.Span, false);
+            if (Target.Mode != TargetMode.None && _drawn.Valid)
+                (Cx, Cz, Span, Follow) = ((float)_drawn.Cx, (float)_drawn.Cz, (float)(_drawn.Span / (BigOn ? MapPrefs.BigZoom : 1)), false);
             Target.Stop();
             _moving = false;
         }
@@ -427,20 +466,24 @@ namespace TimeLightMap
         {
             TargetOff();
             TargetError = e.GetType().Name + ": " + e.Message;
-            Log.Error("topcam: following the squad switched off after an error (the view stays where it was): " + e);
+            Log.Error("topcam: following your people switched off after an error (the view stays where it was): " + e);
         }
 
-        /// <summary>'follow squad': the view follows the squad at this span (world units across). The eased view begins at the
-        /// view on screen (once; a new span keeps gliding). With no picture on screen (the map is off, or nothing has been
-        /// drawn yet) there is nothing to glide from: the target is left unstarted and its first step cuts straight to the
-        /// squad (ViewTarget.Step).</summary>
-        static void FollowSquad(double span)
+        /// <summary>'follow squad' / 'follow selected': the view follows them at this span (world units across). The eased view
+        /// begins at the view on screen (once; a new span keeps gliding). With no picture on screen (the map is off, or nothing
+        /// has been drawn yet) there is nothing to glide from: the target is left unstarted and its first step cuts straight to
+        /// them (ViewTarget.Step).</summary>
+        static void FollowPeople(FollowWho who, double span)
         {
             TargetError = null;
+            Who = who;
             bool running = Target.Mode == TargetMode.Follow && Target.Started;
             if (!running && On && _drawn.Valid) Target.Start(_drawn.Cx, _drawn.Cz, _drawn.Span, _drawn.Cy);
-            (Target.Mode, Target.FollowSpan) = (TargetMode.Follow, span);
+            (Target.Mode, Target.FollowSpan, Target.SpanFactor) = (TargetMode.Follow, span, BigOn ? MapPrefs.BigZoom : 1);
         }
+
+        /// <summary>The metres across the map at the normal size (the follow's span, else the fixed one).</summary>
+        static double ZoomMetres => (Target.Mode == TargetMode.Follow ? Target.FollowSpan : Span) / MapMath.UnitsPerMetre;
 
         static void EnsureTargets(IGpuContext ctx, int w, int h)
         {
@@ -643,7 +686,9 @@ namespace TimeLightMap
         /// (a = both ends; b.y width, b.w casing / the dots' phase); 6 triangle (a = tip, unit direction; b.y length, b.w half
         /// width). b = kind, size, palette slot, parameter.
         /// 7 filled triangle, 8 the same fading away from its first corner (to 0.35 of its strength at the far side): the
-        /// corners are a.xy, a.zw and (b.y, b.w), no casing (the view cone's fan). The palette has 32 slots.</summary>
+        /// corners are a.xy, a.zw and (b.y, b.w), no casing (the view cone's fan). The palette has 32 slots.
+        /// uLook.x: a round map (outside the circle the map is see-through; the pipeline blends), uLook.y: a frame (a dark
+        /// outer line and a light inner one along the edge, square or round).</summary>
         public const string FullFragment = """
             #version 330 core
             in vec2 vUv;
@@ -656,6 +701,7 @@ namespace TimeLightMap
             uniform vec4 uMarkRect;       // xy: the rect's size in pixels, z: the number of shapes, w: the map's alpha
             uniform vec4 uPal[32];
             uniform vec4 uShape[512];
+            uniform vec4 uLook;           // x: 1 round, y: 1 a frame
             void main()
             {
                 vec2 uv = vec2(uFlip.x > 0.5 ? 1.0 - vUv.x : vUv.x, uFlip.y > 0.5 ? 1.0 - vUv.y : vUv.y);
@@ -762,7 +808,21 @@ namespace TimeLightMap
                     c = mix(c, vec3(0.03, 0.03, 0.035), dark * 0.85 * pal.a);
                     c = mix(c, pal.rgb, fill * pal.a);
                 }
-                fragColour = vec4(c, uMarkRect.w);
+                float alpha = uMarkRect.w;
+                vec2 size = uMarkRect.xy;
+                float edge;
+                if (uLook.x > 0.5)
+                {
+                    edge = min(size.x, size.y) * 0.5 - 0.5 - length(p - size * 0.5);
+                    alpha *= smoothstep(-0.5, 0.5, edge);
+                }
+                else edge = min(min(p.x, p.y), min(size.x - p.x, size.y - p.y));
+                if (uLook.y > 0.5)
+                {
+                    c = mix(c, vec3(0.86, 0.80, 0.66), 1.0 - smoothstep(2.6, 3.4, edge));
+                    c = mix(c, vec3(0.04, 0.04, 0.045), 1.0 - smoothstep(1.1, 1.9, edge));
+                }
+                fragColour = vec4(c, alpha);
             }
             """;
 
@@ -785,6 +845,7 @@ namespace TimeLightMap
                     _fuMarkRect = made.Uniform("uMarkRect");
                     _fuPal = made.Uniform("uPal");
                     _fuShape = made.Uniform("uShape");
+                    _fuLook = made.Uniform("uLook");
                     made.Set(_fuPal, Marks.Palette, 4);      // kept: a program's uniform values stay set
                     _palVersion = Marks.PaletteVersion;
                     _full = made;
@@ -824,7 +885,7 @@ namespace TimeLightMap
                 native = true;
                 cmd.BeginRendering(targets.Rendering);
                 rendering = true;
-                var state = full && alpha < 1f ? DrawState.For(targets.Formats, ctx.DepthClamp, blend: Fade) : DrawState.For(targets.Formats, ctx.DepthClamp);
+                var state = full && (alpha < 1f || Round) ? DrawState.For(targets.Formats, ctx.DepthClamp, blend: Fade) : DrawState.For(targets.Formats, ctx.DepthClamp);
                 state.Record(cmd, targets);
                 var pipeline = state.Pipeline(program.Program, program.VertexLayout(default), PrimitiveType.Triangles, targets.Formats,
                     full ? "topcam marks" : "topcam blit");
@@ -838,6 +899,7 @@ namespace TimeLightMap
                     program.Set(_fuAuto, adapted != null ? 1 : 0);
                     program.Set(_fuFlip, flip);
                     program.Set(_fuMarkRect, new Vector4(w, h, shapes, Math.Clamp(alpha, 0f, 1f)));
+                    program.Set(_fuLook, new Vector4(Round ? 1f : 0f, FrameOn ? 1f : 0f, 0f, 0f));
                     if (shapes > 0) program.Set(_fuShape, new ReadOnlySpan<float>(Marks.Shapes, 0, shapes * 8), 4);
                     if (_palVersion != Marks.PaletteVersion)      // a colour of the palette was changed ('cone fill')
                     {
@@ -881,18 +943,25 @@ namespace TimeLightMap
 
         // ---- commands ----
 
-        public const string Usage =
-            "usage: topcam [on|off | view <cx> <cz> <span> | view follow [span] | rect <x> <y> <w> <h> | yaw <deg> [--over <s>] | pitch <35..90> [--over <s>] | fps <n>"
+        public static readonly string Usage =
+            "usage: topcam [on|off|toggle | " + MapPrefs.Words + " | big [on|off] | shape square|round | frame on|off"
+            + " | quality low|medium|high | marks on|off | layer [<" + MapLayers.WordList + "|all> on|off ...] | hostiles on|off | places on|off"
+            + " | cone [on|off] [reach <0.5..8>] [fill <0..1>] | pitch <35..90> [--over <s>] | yaw <deg> [--over <s>] | alpha <0..1> [--over <s>]"
+            + " | textscale <0.5..3> | hidewithui on|off | keys on|off | bind <" + string.Join("|", MapPrefs.KeyActions) + "> <key>|off"
+            + " | save [file] | reset | view <cx> <cz> <span> | view follow [span] | rect <x> <y> <w> <h> | ease <s> | fps <n> | movefps <n>"
             + " | scale <x> | exposure auto|<x> | flip none|x|y|xy | layers <tofc> | shadows on|off | fog on|off | haze on|off | wide on|off"
-            + " | alpha <0..1> [--over <s>] | ease <s> | marks on|off | hostiles on|off | textscale <x> | clip on|off | hidewithui on|off"
-            + " | layer [<" + MapLayers.WordList + "|all> on|off ...] | cone [on|off] [reach <0.5..8>] [fill <0..1>] | places on|off"
-            + " | " + MapPrefs.Words + " | status]";
+            + " | clip on|off | status]";
 
+        static int _winW, _winH;      // the window of the last frame (a corner's rect, when 'corner free' keeps it)
+
+        /// <summary>One topcam command (the words after "topcam"). Ok with a null text: done (the console answers with the
+        /// summary); ok with a text: done, and that is the answer; not ok: the refusal with its usage.</summary>
         public static (bool Ok, string Text) Command(IReadOnlyList<string> a)
         {
             var ci = CultureInfo.InvariantCulture;
             bool F(int i, out float v) { v = 0; return i < a.Count && float.TryParse(a[i], NumberStyles.Float, ci, out v) && float.IsFinite(v); }
             bool Is(int i, string word) => i < a.Count && a[i].Equals(word, StringComparison.OrdinalIgnoreCase);
+            bool Switch(out bool on) { on = false; return a.Count == 2 && MapPrefs.OnOff(a[1], out on); }
             // an angle's [--over <seconds>]: -1 without it (the spring), else the seconds (0: at once)
             bool Glide(out double over)
             {
@@ -908,15 +977,47 @@ namespace TimeLightMap
                 case "on":
                     Error = null;
                     On = true;
-                    _nextDraw = 0;
-                    return (true, Status());
+                    break;
                 case "off":
                     On = false;
-                    return (true, Status());
+                    break;
+                case "toggle":
+                    if (a.Count != 1) return (false, "usage: topcam toggle   (the map on if it is off, off if it is on)");
+                    On = !On;
+                    if (On) Error = null;
+                    break;
+                case "big":
+                {
+                    bool big = !BigOn;
+                    if (a.Count > 2 || (a.Count == 2 && !MapPrefs.OnOff(a[1], out big)))
+                        return (false, "usage: topcam big [on|off]   (the big map in the middle of the window, " + MapPrefs.BigZoom.ToString(ci)
+                                       + " times wider; no argument: switches)");
+                    BigOn = big;
+                    Target.SpanFactor = big ? MapPrefs.BigZoom : 1;
+                    if (big && !On) (On, Error) = (true, null);
+                    break;
+                }
+                case "shape":
+                    if (a.Count != 2 || !MapPrefs.Shape(a[1], out bool round)) return (false, "usage: topcam shape square|round");
+                    Round = round;
+                    (FxError, _fullBroken) = (null, false);      // the marks' program draws the circle: it gets another try
+                    break;
+                case "frame":
+                    if (!Switch(out bool frame)) return (false, "usage: topcam frame on|off   (a thin frame round the map)");
+                    FrameOn = frame;
+                    (FxError, _fullBroken) = (null, false);
+                    break;
+                case "quality":
+                {
+                    if (a.Count != 2 || !MapPrefs.Quality(a[1], out float qs, out float qf, out float qm, out string ql))
+                        return (false, "usage: topcam quality low|medium|high   (high: sharp, 30 pictures a second; medium and low: faster)");
+                    (Scale, Fps, MoveFps, Layers) = (qs, qf, qm, ql);
+                    break;
+                }
                 case "view":
                     if (a.Count >= 2 && a[1].Equals("follow", StringComparison.OrdinalIgnoreCase))
                     {
-                        Target.Stop();      // a view is a cut: it ends the squad follow
+                        Target.Stop();      // a view is a cut: it ends the follow
                         Follow = true;
                         if (F(2, out float fs) && fs > 0) Span = fs;
                         break;
@@ -928,12 +1029,12 @@ namespace TimeLightMap
                     break;
                 case "ease":
                     if (a.Count != 2 || !F(1, out float ease) || ease < 0 || ease > 10)
-                        return (false, "usage: topcam ease <seconds>   (0..10; how far behind the squad the view glides, and how softly yaw and pitch turn; default 0.5)");
+                        return (false, "usage: topcam ease <seconds>   (0..10; how far behind your people the view glides, and how softly yaw and pitch turn; default 0.5)");
                     Target.Ease = ease;
                     break;
                 case "rect":
-                    if (a.Count != 5 || !F(1, out float rx) || !F(2, out float ry) || !F(3, out float rw) || !F(4, out float rh) || rw < 1 || rh < 1)
-                        return (false, "usage: topcam rect <x> <y> <w> <h>   (window pixels, origin top left)");
+                    if (a.Count != 5 || !F(1, out float rx) || !F(2, out float ry) || !F(3, out float rw) || !F(4, out float rh) || rw < 16 || rh < 16 || rx < 0 || ry < 0)
+                        return (false, "usage: topcam rect <x> <y> <w> <h>   (window pixels, origin top left; w and h at least 16)");
                     (RectX, RectY, RectW, RectH) = ((int)rx, (int)ry, (int)rw, (int)rh);
                     Corner = 0;      // an explicit rect ends a corner
                     break;
@@ -946,6 +1047,9 @@ namespace TimeLightMap
                         if (!MapPrefs.Size(a[2], out double pct)) return (false, "usage: topcam " + MapPrefs.Words);
                         CornerSize = pct;
                     }
+                    // free: the map stays where its corner put it (until 'topcam rect' moves it)
+                    if (corner == 0 && Corner != 0 && _winW > 0)
+                        MapPrefs.Rect(Corner, CornerSize, CornerMargin, _winW, _winH, out RectX, out RectY, out RectW, out RectH, Round);
                     Corner = corner;
                     break;
                 }
@@ -953,7 +1057,7 @@ namespace TimeLightMap
                 {
                     if (a.Count != 2 || !MapPrefs.Size(a[1], out double pct)) return (false, "usage: topcam size <small|medium|large|<10..60>>   (the map's height, percent of the window's)");
                     CornerSize = pct;
-                    if (Corner == 0) Corner = 2;      // a size needs a corner: top right
+                    if (Corner == 0) Corner = MapPrefs.DefaultCorner;      // a size needs a corner: top right
                     break;
                 }
                 case "margin":
@@ -962,9 +1066,13 @@ namespace TimeLightMap
                     break;
                 case "zoom":
                 {
-                    if (a.Count != 2 || !F(1, out float metres) || metres < MapPrefs.MinZoom || metres > MapPrefs.MaxZoom)
-                        return (false, "usage: topcam zoom <10..5000>   (metres across the map)");
-                    float units = metres * (float)MapMath.UnitsPerMetre;
+                    const string usage = "usage: topcam zoom <10..5000>|in|out   (metres across the map; in and out: a step of 1.5 times)";
+                    double metres;
+                    if (Is(1, "in") || Is(1, "out")) metres = MapPrefs.ZoomedMetres(ZoomMetres, Is(1, "in"));
+                    else if (F(1, out float m) && m >= MapPrefs.MinZoom && m <= MapPrefs.MaxZoom) metres = m;
+                    else return (false, usage);
+                    if (a.Count != 2) return (false, usage);
+                    float units = (float)(metres * MapMath.UnitsPerMetre);
                     if (Target.Mode == TargetMode.Follow) Target.FollowSpan = units;
                     else Span = units;
                     break;
@@ -972,11 +1080,12 @@ namespace TimeLightMap
                 case "follow":
                 {
                     string what = a.Count == 2 ? a[1].ToLowerInvariant() : "";
-                    if (what == "squad")
+                    if (what is "squad" or "selected")
                     {
                         _holdFirstView = false;
-                        float across = Target.Mode == TargetMode.Follow ? (float)Target.FollowSpan : _drawn.Valid ? (float)_drawn.Span : Span;
-                        FollowSquad(MathF.Max(across, 100f));
+                        double across = Target.Mode == TargetMode.Follow ? Target.FollowSpan
+                            : _drawn.Valid ? _drawn.Span / (BigOn ? MapPrefs.BigZoom : 1) : Span;
+                        FollowPeople(what == "selected" ? FollowWho.Selected : FollowWho.Squad, Math.Max(across, 100));
                     }
                     else if (what == "camera")
                     {
@@ -991,7 +1100,8 @@ namespace TimeLightMap
                         Follow = false;
                         _holdFirstView = !_drawn.Valid;      // nothing drawn yet: stay where the first frame looks
                     }
-                    else return (false, "usage: topcam follow squad|camera|off   (squad: your people; camera: where the main view looks; off: stays put)");
+                    else return (false, "usage: topcam follow squad|selected|camera|off   (squad: your active squad; selected: the people you selected, else the squad; "
+                                        + "camera: where the main view looks; off: stays put)");
                     break;
                 }
                 case "yaw":
@@ -1024,8 +1134,13 @@ namespace TimeLightMap
                     break;
                 }
                 case "fps":
-                    if (a.Count != 2 || !F(1, out float fps) || fps <= 0) return (false, "usage: topcam fps <n>");
+                    if (a.Count != 2 || !F(1, out float fps) || fps < 0.2f || fps > 240f) return (false, "usage: topcam fps <0.2..240>   (how often a still map is drawn again)");
                     Fps = fps;
+                    break;
+                case "movefps":
+                    if (a.Count != 2 || !F(1, out float moveFps) || moveFps < 0f || moveFps > 240f)
+                        return (false, "usage: topcam movefps <0..240>   (how often a moving map is drawn at most; 0: every frame)");
+                    MoveFps = moveFps;
                     break;
                 case "scale":
                     if (a.Count != 2 || !F(1, out float scale) || scale < 0.1f || scale > 4f) return (false, "usage: topcam scale <0.1..4>   (render size = rect x scale)");
@@ -1037,39 +1152,52 @@ namespace TimeLightMap
                     else return (false, "usage: topcam exposure auto | <x>");
                     break;
                 case "flip":
-                    if (a.Count != 2) return (false, "usage: topcam flip none|x|y|xy");
-                    string f = a[1].ToLowerInvariant();
-                    (FlipX, FlipY) = (f.Contains('x'), f.Contains('y'));
+                    if (a.Count != 2 || !MapPrefs.Flip(a[1], out bool fx, out bool fy)) return (false, "usage: topcam flip none|x|y|xy");
+                    (FlipX, FlipY) = (fx, fy);
                     break;
                 case "layers":
-                    if (a.Count != 2) return (false, "usage: topcam layers <letters of: t terrain, o objects, f foliage, c characters>   e.g. topcam layers toc");
-                    Layers = a[1].ToLowerInvariant();
+                    if (a.Count != 2 || !MapPrefs.PictureLayers(a[1], out string layers))
+                        return (false, "usage: topcam layers <letters of: t terrain, o objects, f foliage, c characters>   e.g. topcam layers toc");
+                    Layers = layers;
                     break;
                 case "shadows":
-                    if (a.Count != 2) return (false, "usage: topcam shadows on|off");
-                    Shadows = a[1].Equals("on", StringComparison.OrdinalIgnoreCase);
+                    if (!Switch(out bool shadows)) return (false, "usage: topcam shadows on|off");
+                    Shadows = shadows;
                     break;
                 case "fog":
-                    if (a.Count != 2) return (false, "usage: topcam fog on|off");
-                    NoFog = !a[1].Equals("on", StringComparison.OrdinalIgnoreCase);
+                    if (!Switch(out bool fog)) return (false, "usage: topcam fog on|off");
+                    NoFog = !fog;
                     break;
                 case "haze":
-                    if (a.Count != 2) return (false, "usage: topcam haze on|off   (off, the default: no distance haze or weather fog in the map; on: the game's own)");
-                    NoHaze = !a[1].Equals("on", StringComparison.OrdinalIgnoreCase);
+                    if (!Switch(out bool haze)) return (false, "usage: topcam haze on|off   (off, the default: no distance haze or weather fog in the map; on: the game's own)");
+                    NoHaze = !haze;
                     break;
                 case "wide":
-                    if (a.Count != 2) return (false, "usage: topcam wide on|off   (on, the default: draw distances that suit a zoomed-out map; off: the game's own)");
-                    Wide = a[1].Equals("on", StringComparison.OrdinalIgnoreCase);
+                    if (!Switch(out bool wide)) return (false, "usage: topcam wide on|off   (on, the default: draw distances that suit a zoomed-out map; off: the game's own)");
+                    Wide = wide;
                     break;
                 case "hidewithui":
-                    if (a.Count != 2 || !(Is(1, "on") || Is(1, "off"))) return (false, "usage: topcam hidewithui on|off   (on, the default: the map hides while the game's interface is hidden, F7 or the console's hud hide; off: the map stays on screen)");
-                    HideWithUi = Is(1, "on");
+                    if (!Switch(out bool hide)) return (false, "usage: topcam hidewithui on|off   (on, the default: the map hides while the game's interface is hidden, F7 or the console's hud hide; off: the map stays on screen)");
+                    HideWithUi = hide;
                     break;
                 case "clip":
-                    if (a.Count != 2) return (false, "usage: topcam clip on|off   (on, the default: the game's name tags, task bars, item labels, damage numbers and speech bubbles are kept off the map rect)");
-                    MapHud.ClipOn = a[1].Equals("on", StringComparison.OrdinalIgnoreCase);
-                    if (MapHud.ClipOn) MapHud.ClipError = null;
+                    if (!Switch(out bool clip)) return (false, "usage: topcam clip on|off   (on, the default: the game's name tags, task bars, item labels, damage numbers and speech bubbles are kept off the map rect)");
+                    MapHud.ClipOn = clip;
+                    if (clip) MapHud.ClipError = null;
                     break;
+                case "keys":
+                case "bind":
+                {
+                    string refused = Hotkeys.Command(a);
+                    if (refused != null) return (false, refused);
+                    break;
+                }
+                case "save":
+                    return MapOptions.Save(a);
+                case "reset":
+                    if (a.Count != 1) return (false, "usage: topcam reset   (the options the map started with, again)");
+                    Reset();
+                    return (true, "the map's starting options run again at the next frame (from " + _prefsFrom + ")");
                 default:
                     string said = Marks.Command(a);
                     if (said == null) return (false, Usage);
@@ -1082,16 +1210,61 @@ namespace TimeLightMap
                     break;
             }
             _nextDraw = 0;
-            return (true, Status());
+            return (true, null);
+        }
+
+        /// <summary>Whom the map follows, in the options' words: squad, selected, camera, off.</summary>
+        public static string FollowWord => Target.Mode == TargetMode.Follow ? (Who == FollowWho.Selected ? "selected" : "squad") : Follow ? "camera" : "off";
+
+        /// <summary>The map's options as they stand now, in the config file's words (MapPrefs.Keys): what 'topcam save' keeps.
+        /// fps, scale and layers set by hand are kept only as the nearest quality ('high' for anything else).</summary>
+        public static Dictionary<string, string> CurrentValues()
+        {
+            var ci = CultureInfo.InvariantCulture;
+            int lay = Marks.Layers;
+            string L(int layer) => MapPrefs.OnOffWord(MapLayers.On(lay, layer));
+            double yaw = YawAngle.Target % 360;
+            if (yaw < 0) yaw += 360;
+            string quality = MapPrefs.QualityName(Scale, Fps, MoveFps, Layers);
+            var v = MapPrefs.Defaults();
+            v["map"] = MapPrefs.OnOffWord(On);
+            v["corner"] = MapPrefs.CornerName(Corner) ?? "free";
+            v["size"] = CornerSize.ToString("0.#", ci);
+            v["margin"] = CornerMargin.ToString(ci);
+            v["rect"] = string.Join(" ", RectX.ToString(ci), RectY.ToString(ci), RectW.ToString(ci), RectH.ToString(ci));
+            v["shape"] = Round ? "round" : "square";
+            v["frame"] = MapPrefs.OnOffWord(FrameOn);
+            v["follow"] = FollowWord;
+            v["zoom"] = ZoomMetres.ToString("0.#", ci);
+            v["pitch"] = PitchAngle.Target.ToString("0.#", ci);
+            v["yaw"] = yaw.ToString("0.#", ci);
+            v["alpha"] = _alphaGoal.ToString("0.##", ci);
+            v["quality"] = quality == "custom" ? "high" : quality;
+            v["marks"] = MapPrefs.OnOffWord(Marks.On);
+            v["names"] = L(MapLayers.Names);
+            v["hostiles"] = L(MapLayers.Foes);
+            v["places"] = L(MapLayers.Towns);
+            v["cone"] = L(MapLayers.Cone);
+            v["arrows"] = L(MapLayers.Arrows);
+            v["routes"] = L(MapLayers.Route);
+            v["hurt"] = L(MapLayers.Hurt);
+            v["scale"] = L(MapLayers.Scale);
+            v["north"] = L(MapLayers.North);
+            v["textscale"] = Marks.TextScale.ToString("0.##", ci);
+            v["hidewithui"] = MapPrefs.OnOffWord(HideWithUi);
+            v["keys"] = MapPrefs.OnOffWord(Hotkeys.On);
+            for (int i = 0; i < MapPrefs.KeyActions.Length; i++) v["key_" + MapPrefs.KeyActions[i]] = Hotkeys.Text(i);
+            return v;
         }
 
         /// <summary>Where the map stands, in one plain line: what a command that changed something answers with.</summary>
         public static string Summary()
         {
             var ci = CultureInfo.InvariantCulture;
-            var sb = new StringBuilder(200);
+            var sb = new StringBuilder(240);
             sb.Append("map ").Append(On ? "on" : "off");
             if (Error != null) sb.Append(" (switched off after an error: ").Append(Error).Append(')');
+            if (BigOn) sb.Append(", big (in the middle)");
             string corner = MapPrefs.CornerName(Corner);
             if (corner != null)
                 sb.Append(", ").Append(corner).Append(", size ").Append(CornerSize.ToString("0.#", ci)).Append("% of the window's height, margin ")
@@ -1099,32 +1272,50 @@ namespace TimeLightMap
             else
                 sb.Append(", rect ").Append(RectX.ToString(ci)).Append(' ').Append(RectY.ToString(ci)).Append(' ').Append(RectW.ToString(ci))
                   .Append(' ').Append(RectH.ToString(ci));
-            bool squad = Target.Mode == TargetMode.Follow;
-            double across = (squad ? Target.FollowSpan : Span) / MapMath.UnitsPerMetre;
-            sb.Append(", ").Append(MapMath.Num(across)).Append(" m across, ");
-            sb.Append(squad ? "follows the squad" : Follow ? "follows the camera" : "stays put");
+            if (Round) sb.Append(", round");
+            if (FrameOn) sb.Append(", framed");
+            sb.Append(", ").Append(MapMath.Num(ZoomMetres)).Append(" m across");
+            if (BigOn) sb.Append(" (x").Append(MapPrefs.BigZoom.ToString(ci)).Append(" while big)");
+            sb.Append(", ").Append(FollowWord switch
+            {
+                "squad" => "follows your squad",
+                "selected" => "follows the selected people",
+                "camera" => "follows the camera",
+                _ => "stays put",
+            });
             if (PitchAngle.Target < 90) sb.Append(", pitch ").Append(MapMath.Num(PitchAngle.Target));
             if (YawAngle.Target != 0) sb.Append(", yaw ").Append(MapMath.Num(YawAngle.Target));
             if (_alphaGoal < 1f) sb.Append(", alpha ").Append(MapMath.Num(_alphaGoal, "0.##"));
+            string quality = MapPrefs.QualityName(Scale, Fps, MoveFps, Layers);
+            if (quality != "high") sb.Append(", quality ").Append(quality);
             if (!HideWithUi) sb.Append(", stays when the interface is hidden");
             sb.Append(", marks ").Append(Marks.On ? "on" : "off");
             if (Marks.Error != null) sb.Append(" (switched off after an error: ").Append(Marks.Error).Append(')');
             if (Marks.On)
-                sb.Append(", cone ").Append(MapLayers.On(Marks.Layers, MapLayers.Cone) ? "on" : "off")
-                  .Append(", places ").Append(Marks.AutoPlaces ? "on" : "off");
+            {
+                string off = "";
+                for (int i = 0; i < MapLayers.Count; i++)
+                    if (!MapLayers.On(Marks.Layers, i)) off += (off.Length > 0 ? " " : "") + MapLayers.Words[i];
+                if (off.Length > 0) sb.Append(" (off: ").Append(off).Append(')');
+            }
             if (FxError != null) sb.Append("; the marks' shader failed (").Append(FxError).Append("), the plain picture is shown");
+            sb.Append("; keys ").Append(Hotkeys.Summary());
             return sb.ToString();
         }
 
         public static string Status()
         {
             var ci = CultureInfo.InvariantCulture;
-            var sb = new StringBuilder(1024);
+            var sb = new StringBuilder(1400);
             sb.Append("{\"on\":").Append(On ? "true" : "false");
             sb.Append(",\"version\":\"").Append(Version).Append('"');
+            sb.Append(",\"options\":").Append(MapMath.JsonText(_prefsFrom));
             sb.Append(",\"hideWithUi\":").Append(HideWithUi ? "true" : "false");
             sb.Append(",\"corner\":").Append(MapMath.JsonText(MapPrefs.CornerName(Corner)));      // null: the rect is 'topcam rect''s
             sb.Append(",\"cornerSize\":").Append(MapMath.Num(CornerSize, "0.#")).Append(",\"cornerMargin\":").Append(CornerMargin.ToString(ci));
+            sb.Append(",\"shape\":\"").Append(Round ? "round" : "square").Append("\",\"frame\":").Append(FrameOn ? "true" : "false");
+            sb.Append(",\"big\":").Append(BigOn ? "true" : "false");
+            sb.Append(",\"follow\":\"").Append(FollowWord).Append('"');
             sb.Append(",\"view\":{\"follow\":").Append(Follow ? "true" : "false");
             sb.Append(",\"cx\":").Append(Cx.ToString("0.#", ci)).Append(",\"cz\":").Append(Cz.ToString("0.#", ci));
             // yaw, pitch: the angles of the last drawn frame (the settings themselves while nothing is drawn)
@@ -1132,28 +1323,31 @@ namespace TimeLightMap
             sb.Append(",\"span\":").Append(Span.ToString("0.#", ci)).Append(",\"yaw\":").Append(MapMath.Num(shown ? _drawnYaw : YawAngle.Value, "0.##"));
             sb.Append(",\"pitch\":").Append(MapMath.Num(shown ? _drawnPitch : PitchAngle.Value, "0.##"));
             sb.Append(",\"yawTarget\":").Append(MapMath.Num(YawAngle.Target, "0.##")).Append(",\"pitchTarget\":").Append(MapMath.Num(PitchAngle.Target, "0.##"));
-            sb.Append(",\"drawn\":\"").Append(LastView).Append("\"}");
+            sb.Append(",\"turning\":").Append(YawAngle.Moving || PitchAngle.Moving ? "true" : "false");
+            sb.Append(",\"drawn\":").Append(MapMath.JsonText(LastView)).Append('}');
 
             sb.Append(",\"target\":{\"mode\":\"").Append(Target.Mode.ToString().ToLowerInvariant()).Append('"');
             if (Target.Mode == TargetMode.Follow)
-                sb.Append(",\"span\":").Append(MapMath.Num(Target.FollowSpan)).Append(",\"pack\":").Append(Pack.Count)
+                sb.Append(",\"span\":").Append(MapMath.Num(Target.FollowSpan)).Append(",\"factor\":").Append(MapMath.Num(Target.SpanFactor, "0.##"))
                   .Append(",\"cx\":").Append(MapMath.Num(Target.AimCx)).Append(",\"cz\":").Append(MapMath.Num(Target.AimCz))
                   .Append(",\"aimSpan\":").Append(MapMath.Num(Target.AimSpan));
             sb.Append(",\"ease\":").Append(MapMath.Num(Target.Ease, "0.###"));
             sb.Append(",\"error\":").Append(MapMath.JsonText(TargetError)).Append('}');
+            sb.Append(",\"people\":{\"count\":").Append(Pack.Count).Append(",\"squad\":").Append(Pack.Squad).Append(",\"followed\":").Append(Pack.Followed).Append('}');
 
             sb.Append(",\"now\":{\"cx\":").Append(MapMath.Num(_drawn.Valid ? _drawn.Cx : Cx, "0.##"));
             sb.Append(",\"cz\":").Append(MapMath.Num(_drawn.Valid ? _drawn.Cz : Cz, "0.##"));
             sb.Append(",\"span\":").Append(MapMath.Num(_drawn.Valid ? _drawn.Span : Span, "0.##"));
             sb.Append(",\"cy\":").Append(MapMath.Num(_drawn.Valid ? _drawn.Cy : 0, "0.#")).Append('}');
             sb.Append(",\"moving\":").Append(_moving ? "true" : "false");
-            sb.Append(",\"yawTarget\":").Append(MapMath.Num(YawAngle.Target, "0.##")).Append(",\"pitchTarget\":").Append(MapMath.Num(PitchAngle.Target, "0.##"));
-            sb.Append(",\"turning\":").Append(YawAngle.Moving || PitchAngle.Moving ? "true" : "false");
             sb.Append(",\"alpha\":").Append(MapMath.Num(_alphaNow, "0.###")).Append(",\"alphaTarget\":").Append(MapMath.Num(_alphaGoal, "0.###"));
 
-            sb.Append(",\"rect\":[").Append(RectX).Append(',').Append(RectY).Append(',').Append(RectW).Append(',').Append(RectH).Append(']');
+            sb.Append(",\"rect\":[").Append(_mapX).Append(',').Append(_mapY).Append(',').Append(_mapW).Append(',').Append(_mapH).Append(']');
+            sb.Append(",\"freeRect\":[").Append(RectX).Append(',').Append(RectY).Append(',').Append(RectW).Append(',').Append(RectH).Append(']');
             sb.Append(",\"size\":[").Append(_width).Append(',').Append(_height).Append(']');
-            sb.Append(",\"fps\":").Append(Fps.ToString("0.#", ci));
+            sb.Append(",\"quality\":\"").Append(MapPrefs.QualityName(Scale, Fps, MoveFps, Layers)).Append('"');
+            sb.Append(",\"fps\":").Append(Fps.ToString("0.#", ci)).Append(",\"moveFps\":").Append(MoveFps.ToString("0.#", ci));
+            sb.Append(",\"scale\":").Append(Scale.ToString("0.##", ci));
             sb.Append(",\"lastDrawMs\":").Append(LastDrawMs.ToString("0.00", ci));
             sb.Append(",\"lastBlitMs\":").Append(LastBlitMs.ToString("0.00", ci));
             sb.Append(",\"draws\":").Append(Draws);
@@ -1163,11 +1357,13 @@ namespace TimeLightMap
             sb.Append(",\"exposure\":").Append(ManualExposure < 0 ? "\"auto\"" : ManualExposure.ToString("0.###", ci));
             sb.Append(",\"marks\":");
             Marks.Status(sb);
+            sb.Append(",\"keys\":");
+            Hotkeys.Status(sb);
             sb.Append(",\"clip\":{\"on\":").Append(MapHud.ClipOn ? "true" : "false").Append(",\"dropped\":").Append(MapHud.Dropped)
               .Append(",\"trimmed\":").Append(MapHud.Trimmed).Append(",\"error\":").Append(MapMath.JsonText(MapHud.ClipError)).Append('}');
             sb.Append(",\"fxError\":").Append(MapMath.JsonText(FxError));
             sb.Append(",\"up\":\"-Z (north) at yaw 0\",\"right\":\"+X (east) at yaw 0\"");
-            sb.Append(",\"error\":").Append(Error == null ? "null" : "\"" + Error.Replace("\\", "\\\\").Replace("\"", "'").Replace("\n", " ") + "\"");
+            sb.Append(",\"error\":").Append(MapMath.JsonText(Error));
             sb.Append('}');
             return sb.ToString();
         }

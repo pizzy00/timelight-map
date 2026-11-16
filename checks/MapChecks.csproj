@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Desk checks of the mod's pure code (..\MapMath.cs and ..\MapPrefs.cs, compiled as they are: no game types in them).
+       Not part of the release; needs no game install. Run from this folder:  dotnet run -c Release   (exit code 0 = every check passed) -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>13</LangVersion>
+    <RootNamespace>MapChecks</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableSourceLink>false</EnableSourceLink>
+    <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs;MapLayerChecks.cs;PlaceChecks.cs;PrefsChecks.cs;PublicChecks.cs;V130Checks.cs" />
+    <Compile Include="..\MapMath.cs" Link="MapMath.cs" />
+    <Compile Include="..\MapPrefs.cs" Link="MapPrefs.cs" />
+    <None Include="..\package\timelight-map.cfg.sample" Link="timelight-map.cfg.sample" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+</Project>

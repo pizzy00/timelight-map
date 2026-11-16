@@ -1,0 +1,5 @@
+# LF everywhere: the build is byte for byte the same on every machine (Deterministic + PathMap)
+* text=auto eol=lf
+*.mod binary
+*.dll binary
+*.png binary
