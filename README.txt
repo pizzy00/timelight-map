@@ -1,4 +1,4 @@
-TimeLight Map 1.3.0
+TimeLight Map 1.3.1
 ===================
 
 A live 3D map in a corner of the game window, for MeitouClient.
@@ -22,11 +22,11 @@ in a small config file, or in the game's console.
 REQUIREMENTS
 ------------
 
-  - MeitouClient 0.20.x (the open-source engine that runs Kenshi's game files). The mod is built against 0.20.0 and
-    also loads on 0.20.1. The game refuses to load it on anything older than 0.20.0 or from 0.21.0 on.
-    On MeitouClient 0.19.x use TimeLight Map 1.1.0; on 0.17.x use 1.0.0.
+  - MeitouClient 0.21.x (the open-source engine that runs Kenshi's game files). The mod is built against 0.21.0.
+    The game refuses to load it on anything older than 0.21.0 or from 0.22.0 on.
+    On MeitouClient 0.20.x use TimeLight Map 1.3.0; on 0.19.x use 1.1.0; on 0.17.x use 1.0.0.
   - It does NOT run on stock Kenshi or on RE_Kenshi. Those ignore the code; nothing happens there.
-  - Developed and played on the Linux build (Vulkan). 1.3.0 also loads on the Windows build of 0.20.1. Not expected
+  - Developed and played on the Linux build (Vulkan). 1.3.0 also loaded on the Windows build of 0.20.1. Not expected
     to work on the macOS (Metal) build.
 
 
@@ -49,7 +49,7 @@ INSTALL
      N shows and hides it, Shift+N makes it big, = and - zoom.
 
   The game's log output then has the line:
-         mod       timelight-map: TimeLight Map 1.3.0 ready: 8 patches, 0 failed; ...
+         mod       timelight-map: TimeLight Map 1.3.1 ready: 8 patches, 0 failed; ...
 
   To remove the mod: untick it, or delete the folder. The mod keeps no data in your saves. The game itself notes
   which code mods a save was made with and tells you once when that list has changed; the save loads either way.
@@ -58,14 +58,14 @@ INSTALL
 THE FILE IS CALLED Meitou.Tests.dll. WHY?
 -----------------------------------------
 
-The map needs parts of the engine that MeitouClient 0.20 keeps internal (its renderer and its HUD). The engine lets
+The map needs parts of the engine that MeitouClient 0.21 keeps internal (its renderer and its HUD). The engine lets
 exactly one assembly name see those parts: "Meitou.Tests", the name of its own test project. So the mod's DLL carries
 that name. It contains no tests and nothing of MeitouClient's; it is this mod's own code, and the source is in
-TimeLightMap-1.3.0-source.zip. What this means for you:
+TimeLightMap-1.3.1-source.zip. What this means for you:
 
-  - The mod is tied to MeitouClient 0.20.x. Internal parts change without notice; a new MeitouClient release may need
-    a new build of this mod. The mod declares the versions it accepts (">=0.20.0 <0.21.0"); outside them the game
-    leaves it out with a notice instead of crashing. On a later 0.20.x a part that no longer fits switches itself off
+  - The mod is tied to MeitouClient 0.21.x. Internal parts change without notice; a new MeitouClient release may need
+    a new build of this mod. The mod declares the versions it accepts (">=0.21.0 <0.22.0"); outside them the game
+    leaves it out with a notice instead of crashing. On a later 0.21.x a part that no longer fits switches itself off
     and says so in the log.
   - If a later MeitouClient closes this door, the mod will need another way in.
   - Another mod that uses the same trick ships a file of the same name in its own folder. By the engine's loader each
@@ -280,15 +280,16 @@ License as published by the Free Software Foundation, either version 3 of the Li
 version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
 warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The full text is in the file LICENSE.
 
-The complete source code is in TimeLightMap-1.3.0-source.zip, published together with this zip.
+The complete source code is in TimeLightMap-1.3.1-source.zip, published together with this zip.
 
-The mod is built against MeitouClient 0.20.0, which is licensed GPL-3.0-or-later, and patches it at run time with
+The mod is built against MeitouClient 0.21.0, which is licensed GPL-3.0-or-later, and patches it at run time with
 Harmony, which is licensed MIT. Both come with the game; neither is included here. No game data or assets are included.
 
 
 VERSIONS
 --------
 
+1.3.1  Built for MeitouClient 0.21.0 (accepts 0.21.x). The map itself is unchanged.
 1.3.0  Built for MeitouClient 0.20.0 (accepts 0.20.x). New: a settings page (Settings > Mods), hotkeys (N, Shift+N,
        =, -), the big map, a round map, a frame, routes of the selected people, hurt rings, follow selected, quality
        presets, topcam save / reset. Fixed: the map follows your active squad (not every squad mixed together); wrong
