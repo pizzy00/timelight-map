@@ -2,6 +2,11 @@
 
 All notable changes to TimeLight Map. The player's manual is [README.txt](README.txt).
 
+## 1.3.2 (2026-11-19)
+
+Built against MeitouClient 0.22.0; accepts 0.22.x. The map itself is unchanged: every game method it hooks is
+there in 0.22.0 with the same signature. On MeitouClient 0.21.x keep using 1.3.1, on 0.20.x 1.3.0.
+
 ## 1.3.1 (2026-11-17)
 
 Built against MeitouClient 0.21.0; accepts 0.21.x. The map itself is unchanged: every game method it hooks is
