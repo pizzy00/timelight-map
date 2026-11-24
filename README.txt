@@ -1,4 +1,4 @@
-TimeLight Map 1.3.2
+TimeLight Map 1.4.0
 ===================
 
 A live 3D map in a corner of the game window, for MeitouClient.
@@ -49,7 +49,7 @@ INSTALL
      N shows and hides it, Shift+N makes it big, = and - zoom.
 
   The game's log output then has the line:
-         mod       timelight-map: TimeLight Map 1.3.2 ready: 8 patches, 0 failed; ...
+         mod       timelight-map: TimeLight Map 1.4.0 ready: 8 patches, 0 failed; ...
 
   To remove the mod: untick it, or delete the folder. The mod keeps no data in your saves. The game itself notes
   which code mods a save was made with and tells you once when that list has changed; the save loads either way.
@@ -61,7 +61,7 @@ THE FILE IS CALLED Meitou.Tests.dll. WHY?
 The map needs parts of the engine that MeitouClient 0.22 keeps internal (its renderer and its HUD). The engine lets
 exactly one assembly name see those parts: "Meitou.Tests", the name of its own test project. So the mod's DLL carries
 that name. It contains no tests and nothing of MeitouClient's; it is this mod's own code, and the source is in
-TimeLightMap-1.3.2-source.zip. What this means for you:
+TimeLightMap-1.4.0-source.zip. What this means for you:
 
   - The mod is tied to MeitouClient 0.22.x. Internal parts change without notice; a new MeitouClient release may need
     a new build of this mod. The mod declares the versions it accepts (">=0.22.0 <0.23.0"); outside them the game
@@ -92,9 +92,9 @@ THE SETTINGS PAGE
 -----------------
 
 Settings > Mods > TimeLight Map has the everyday options: map on/off, corner, size, shape, frame, follow, zoom,
-tilt, strength, quality, each kind of mark, text size, hide with the interface, and the four hotkeys. A change shows
-at once. The game keeps what you change there (in its meitou.user.json) and it wins over the config file. "Reset"
-on the page goes back to the config file's value (or the built-in default when there is no file).
+auto zoom, close zoom, tilt, strength, quality, each kind of mark, text size, hide with the interface, and the four
+hotkeys. A change shows at once. The game keeps what you change there (in its meitou.user.json) and it wins over the
+config file. "Reset" on the page goes back to the config file's value (or the built-in default when there is no file).
 
 
 CONFIG FILE
@@ -124,7 +124,12 @@ game and type  topcam save file  to write the file from what you see.
                                                                               when nobody is selected)
                                                                               camera: the spot the main view looks at
                                                                               off: stays where it is
-  zoom         10..5000                                          150          metres across the map, left to right
+  zoom         10..5000                                          150          metres across the map, left to right (widest
+                                                                              zoom when autozoom is on)
+  minzoom      10..5000                                          50           closest metres across when your followed
+                                                                              group is huddled together (with autozoom on)
+  autozoom     on | off                                          on           zooms in closer when your group is close
+                                                                              together, out as they spread
   pitch        35..90                                            90           90 looks straight down; lower tilts the view
                                                                               so heights show
   yaw          0..360                                            0            the map's turn: 0 north up, 90 east up
@@ -183,7 +188,9 @@ Everyday:
   topcam shape round                a round map;  topcam shape square
   topcam frame on                   a thin frame round the map;  topcam frame off
   topcam zoom 150                   metres across the map (10..5000); try 60 for a fight, 600 for travel
-  topcam zoom in                    a step closer (1.5 times);  topcam zoom out
+  topcam zoom in                    a step closer (1.5 times);  topcam zoom out;  topcam zoom auto  (turns autozoom on)
+  topcam autozoom on                zoom in closer when your group is huddled together;  topcam autozoom off
+  topcam minzoom 50                 closest metres across for auto-zoom (10..5000)
   topcam follow squad               stay on your active squad
   topcam follow selected            stay on the people you select (on the squad while nobody is selected)
   topcam follow camera              stay on the spot the main view looks at
@@ -280,7 +287,7 @@ License as published by the Free Software Foundation, either version 3 of the Li
 version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
 warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The full text is in the file LICENSE.
 
-The complete source code is in TimeLightMap-1.3.2-source.zip, published together with this zip.
+The complete source code is in TimeLightMap-1.4.0-source.zip, published together with this zip.
 
 The mod is built against MeitouClient 0.22.0, which is licensed GPL-3.0-or-later, and patches it at run time with
 Harmony, which is licensed MIT. Both come with the game; neither is included here. No game data or assets are included.
@@ -289,6 +296,11 @@ Harmony, which is licensed MIT. Both come with the game; neither is included her
 VERSIONS
 --------
 
+1.4.0  Built for MeitouClient 0.22.0 (accepts 0.22.x). New: group auto-zoom (autozoom / minzoom) that eases in closer
+       when your squad is huddled together and out as they spread. Improved: balanced two-wing squad name columns,
+       leader-line avoidance so town names stay clear, darker text pills and chrome backing. Fixed: window clip and
+       round-map aspect, stale shown-frame state, topcam reset completeness, settings corner/custom-key handling, sky
+       eye restore, non-finite camera guard. Full list: CHANGELOG.md.
 1.3.2  Built for MeitouClient 0.22.0 (accepts 0.22.x). The map itself is unchanged.
 1.3.1  Built for MeitouClient 0.21.0 (accepts 0.21.x). The map itself is unchanged.
 1.3.0  Built for MeitouClient 0.20.0 (accepts 0.20.x). New: a settings page (Settings > Mods), hotkeys (N, Shift+N,

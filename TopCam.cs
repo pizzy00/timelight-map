@@ -55,7 +55,7 @@ namespace TimeLightMap
     /// </summary>
     internal static class TopCam
     {
-        public const string Version = "1.3.2";
+        public const string Version = "1.4.0";
 
         // ---- settings (set by commands, read by the render hook; both on the main thread) ----
         // The values here are the state before the options run (MapPrefs.Commands, at the first drawn frame): off, top right.
@@ -154,6 +154,7 @@ namespace TimeLightMap
             while (Pending.TryDequeue(out var words)) RunQueued(words);
             if (!On)
             {
+                _shownStamp = 0;
                 if (_colour != null) FreeTargets();
                 return;
             }
@@ -164,6 +165,7 @@ namespace TimeLightMap
             catch (Exception e)
             {
                 On = false;
+                _shownStamp = 0;
                 Error = e.GetType().Name + ": " + e.Message;
                 Log.Error("topcam switched off after an error: " + e);
             }
@@ -182,7 +184,17 @@ namespace TimeLightMap
         /// <summary>'topcam reset': the options the map started with, again.</summary>
         static void Reset()
         {
-            if (_startValues != null) _prefs = MapPrefs.Commands(_startValues);
+            if (_startValues == null) return;
+            BigOn = false;
+            Target.SpanFactor = 1;
+            Target.Ease = 0.5;
+            FlipX = FlipY = Shadows = false;
+            NoFog = NoHaze = Wide = true;
+            ManualExposure = -1f;
+            MapHud.ClipOn = true;
+            MapHud.ClipError = null;
+            Marks.ResetDefaults();
+            _prefs = MapPrefs.Commands(_startValues);
         }
 
         /// <summary>Commands for the render hook to run at the next frame (the settings page's changes; any thread).</summary>
@@ -267,29 +279,41 @@ namespace TimeLightMap
         static void Frame(GameHost host, int width, int height)
         {
             var gpu = host.Gpu;
-            if (gpu == null || gpu.Terrain == null) return;
+            if (gpu == null || gpu.Terrain == null || width <= 0 || height <= 0) { _shownStamp = 0; return; }
             (_winW, _winH) = (width, height);
             MapRect(width, height);
             var chain = gpu.PostChain;
-            if (chain == null) return;
+            if (chain == null) { _shownStamp = 0; return; }
             var ctx = chain.Context;
             var picture = chain.Target;
-            if (ctx == null || picture == null) return;
-            if (_lightFrame != _frame - 1 || _mainOptions == null) return;   // no world drawn this frame (menus, loading)
-            if (ctx.PassOpen) return;                                        // never inside somebody else's pass
+            if (ctx == null || picture == null || picture.Desc.Width <= 0 || picture.Desc.Height <= 0) { _shownStamp = 0; return; }
+            if (_lightFrame != _frame - 1 || _mainOptions == null)   // no world drawn this frame (menus, loading)
+            {
+                _wasHidden = true;
+                _moving = false;
+                _shownStamp = 0;
+                return;
+            }
+            if (ctx.PassOpen) { _shownStamp = 0; return; }           // never inside somebody else's pass
+
+            // the rect in window pixels, clipped to the output (before render size and aspect so the picture is never squashed)
+            int outW = Math.Min(width, picture.Desc.Width), outH = Math.Min(height, picture.Desc.Height);
+            int x = Math.Clamp(_mapX, 0, outW - 1), rw = Math.Clamp(_mapW, 1, outW - x);
+            int top = Math.Clamp(_mapY, 0, outH - 1), rh = Math.Clamp(_mapH, 1, outH - top);
+            if (Round) rw = rh = Math.Min(rw, rh);
 
             double now = Clock.Elapsed.TotalSeconds;
             double dt = _lastStep < 0 ? 0 : Math.Clamp(now - _lastStep, 0, 0.25);
             _lastStep = now;
             float alpha = StepAlpha(now);
 
-            int w = Math.Clamp((int)MathF.Round(_mapW * Scale), 16, 4096), h = Math.Clamp((int)MathF.Round(_mapH * Scale), 16, 4096);
+            int w = Math.Clamp((int)MathF.Round(rw * Scale), 16, 4096), h = Math.Clamp((int)MathF.Round(rh * Scale), 16, 4096);
             bool marks = Marks.On && alpha > 0f;
             if (Target.Mode == TargetMode.Follow || marks) ReadPack(host);
             else if (Pack.Count > 0) Pack.Clear();
 
             // the view of this frame: the eased one is stepped even while the map is faded out, so it comes back in the right place
-            var view = NextView(host, gpu, dt, w / (float)h);
+            var view = NextView(host, gpu, dt, rw / (float)rh);
             if (alpha <= 0f || (HideWithUi && UiHidden(host)))
             {
                 _wasHidden = true;
@@ -299,7 +323,7 @@ namespace TimeLightMap
             }
 
             // a still map is drawn 'fps' times a second; a moving one every frame, or at most 'movefps' times a second
-            _moving = (Target.Mode != TargetMode.None || _angleGlide) && _drawn.Valid && !view.Near(_drawn, 0.05, _mapW);
+            _moving = (Target.Mode != TargetMode.None || _angleGlide) && _drawn.Valid && !view.Near(_drawn, 0.05, rw);
             if (_colour == null || w != _width || h != _height || now >= _nextDraw || _wasHidden || !_drawn.Valid
                 || (_moving && (MoveFps <= 0f || now >= _nextMove)))
             {
@@ -314,11 +338,6 @@ namespace TimeLightMap
                 LastDrawMs = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
                 Draws++;
             }
-
-            // the rect in window pixels, clipped to the output
-            int outW = Math.Min(width, picture.Desc.Width), outH = Math.Min(height, picture.Desc.Height);
-            int x = Math.Clamp(_mapX, 0, Math.Max(outW - 1, 0)), rw = Math.Clamp(_mapW, 1, Math.Max(outW - x, 1));
-            int top = Math.Clamp(_mapY, 0, Math.Max(outH - 1, 0)), rh = Math.Clamp(_mapH, 1, Math.Max(outH - top, 1));
 
             // the marks of this frame, in the view the picture was drawn with (with the main camera of this same frame, for
             // the view cone, and the game clock as this frame draws it, for the heading arrows)
@@ -341,10 +360,11 @@ namespace TimeLightMap
             }
 
             long t1 = Stopwatch.GetTimestamp();
+            int blitY = picture.Desc.Height - (top + rh);
             bool full = (shapes > 0 || alpha < 1f || Round || FrameOn) && !_fullBroken;
             try
             {
-                Blit(ctx, gpu, picture, x, outH - (top + rh), rw, rh, full, full ? alpha : 1f, full ? shapes : 0);
+                Blit(ctx, gpu, picture, x, blitY, rw, rh, full, full ? alpha : 1f, full ? shapes : 0);
             }
             catch (Exception e) when (full)
             {
@@ -353,7 +373,7 @@ namespace TimeLightMap
                 FxError = e.GetType().Name + ": " + e.Message;
                 Log.Error("topcam: the marks / fade program failed, the plain picture stays: " + e);
                 if (Marks.On) Marks.Fail("blit", e);
-                Blit(ctx, gpu, picture, x, outH - (top + rh), rw, rh, false, 1f, 0);
+                Blit(ctx, gpu, picture, x, blitY, rw, rh, false, 1f, 0);
             }
             LastBlitMs = Stopwatch.GetElapsedTime(t1).TotalMilliseconds;
             (_shownX, _shownY, _shownW, _shownH) = (x, top, rw, rh);
@@ -423,14 +443,14 @@ namespace TimeLightMap
             {
                 try
                 {
-                    Target.Step(dt, Pack.HasCentre, Pack.CentreX, Pack.CentreZ);
+                    Target.Step(dt, Pack.HasCentre, Pack.CentreX, Pack.CentreZ, Pack.Spread);
                     (cx, cz, span) = (Target.Cx, Target.Cz, Target.Span);
                     eased = true;
                     if (Target.WaitingForPoint && host.Camera != null)
                     {
                         // nobody to follow yet (none of your people alive): look where the main camera looks until there is
                         var look = host.Camera.Target;
-                        (cx, cz) = (look.X, look.Z);
+                        if (float.IsFinite(look.X) && float.IsFinite(look.Z)) (cx, cz) = (look.X, look.Z);
                     }
                 }
                 catch (Exception e)
@@ -442,9 +462,12 @@ namespace TimeLightMap
             if (!eased && (Follow || _holdFirstView) && host.Camera != null)
             {
                 var target = host.Camera.Target;
-                (cx, cz) = (target.X, target.Z);
-                // 'follow off' was asked before anything was drawn: this first view is where the map stays
-                if (_holdFirstView) (Cx, Cz, _holdFirstView) = (target.X, target.Z, false);
+                if (float.IsFinite(target.X) && float.IsFinite(target.Z))
+                {
+                    (cx, cz) = (target.X, target.Z);
+                    // 'follow off' was asked before anything was drawn: this first view is where the map stays
+                    if (_holdFirstView) (Cx, Cz, _holdFirstView) = (target.X, target.Z, false);
+                }
             }
             if (!eased && BigOn) span *= MapPrefs.BigZoom;
             span = Math.Clamp(span, 20, 60000);
@@ -559,6 +582,7 @@ namespace TimeLightMap
             var sky = gpu.Sky;
             bool hazeSaved = false, skyMeitouHaze = false, skyKenshiHaze = false;
             float skyStrength = 0, skyClearance = 0;
+            Vector3 skyEye = default;
             (float Weight, Vector3 Colour, float Distance)? skyFog = null;
             try
             {
@@ -581,8 +605,8 @@ namespace TimeLightMap
                 // (as the reflection does with the shadow block): the main view never sees it.
                 if (NoHaze && sky != null)
                 {
-                    (skyStrength, skyMeitouHaze, skyKenshiHaze, skyFog, skyClearance) =
-                        (sky.HazeStrength, sky.MeitouHaze, sky.KenshiHaze, sky.FogInput, sky.EyeClearance);
+                    (skyStrength, skyMeitouHaze, skyKenshiHaze, skyFog, skyClearance, skyEye) =
+                        (sky.HazeStrength, sky.MeitouHaze, sky.KenshiHaze, sky.FogInput, sky.EyeClearance, sky.Eye);
                     hazeSaved = true;
                     sky.MeitouHaze = true;
                     sky.HazeStrength = 0f;
@@ -654,6 +678,7 @@ namespace TimeLightMap
                         sky.KenshiHaze = skyKenshiHaze;
                         sky.FogInput = skyFog;
                         sky.SetEye(new Vector3(0f, skyClearance, 0f), FlatGround, float.NegativeInfinity);      // EyeClearance as it was
+                        sky.Eye = skyEye;
                     }
                     catch (Exception e) { Log.Error("topcam: the sky's haze settings were not put back: " + e.Message); }
                 }
@@ -979,10 +1004,12 @@ namespace TimeLightMap
             switch (a[0].ToLowerInvariant())
             {
                 case "on":
+                    if (a.Count != 1) return (false, "usage: topcam on");
                     Error = null;
                     On = true;
                     break;
                 case "off":
+                    if (a.Count != 1) return (false, "usage: topcam off");
                     On = false;
                     break;
                 case "toggle":
@@ -1021,14 +1048,20 @@ namespace TimeLightMap
                 case "view":
                     if (a.Count >= 2 && a[1].Equals("follow", StringComparison.OrdinalIgnoreCase))
                     {
+                        float fs = 0;
+                        if (a.Count > 3 || (a.Count == 3 && (!F(2, out fs) || fs <= 0)))
+                            return (false, "usage: topcam view <cx> <cz> <span> | topcam view follow [span]   (world units, 10 = 1 m)");
                         Target.Stop();      // a view is a cut: it ends the follow
+                        _moving = false;
+                        _holdFirstView = false;
                         Follow = true;
-                        if (F(2, out float fs) && fs > 0) Span = fs;
+                        if (a.Count == 3) Span = fs;
                         break;
                     }
                     if (a.Count != 4 || !F(1, out float cx) || !F(2, out float cz) || !F(3, out float span) || span <= 0)
                         return (false, "usage: topcam view <cx> <cz> <span> | topcam view follow [span]   (world units, 10 = 1 m)");
                     Target.Stop();
+                    _moving = false;
                     (Cx, Cz, Span, Follow, _holdFirstView) = (cx, cz, span, false, false);
                     break;
                 case "ease":
@@ -1070,17 +1103,38 @@ namespace TimeLightMap
                     break;
                 case "zoom":
                 {
-                    const string usage = "usage: topcam zoom <10..5000>|in|out   (metres across the map; in and out: a step of 1.5 times)";
+                    const string usage = "usage: topcam zoom <10..5000>|in|out|auto   (metres across the map; in and out: a step of 1.5 times; auto: close in on tight groups)";
+                    if (a.Count != 2) return (false, usage);
+                    if (Is(1, "auto"))
+                    {
+                        Target.AutoZoom = true;
+                        break;
+                    }
                     double metres;
-                    if (Is(1, "in") || Is(1, "out")) metres = MapPrefs.ZoomedMetres(ZoomMetres, Is(1, "in"));
+                    if (Is(1, "in") || Is(1, "out"))
+                    {
+                        double from = Target.Mode == TargetMode.Follow && Target.AutoZoom && _drawn.Valid
+                            ? _drawn.Span / (BigOn ? MapPrefs.BigZoom : 1) / MapMath.UnitsPerMetre
+                            : ZoomMetres;
+                        metres = MapPrefs.ZoomedMetres(from, Is(1, "in"));
+                    }
                     else if (F(1, out float m) && m >= MapPrefs.MinZoom && m <= MapPrefs.MaxZoom) metres = m;
                     else return (false, usage);
-                    if (a.Count != 2) return (false, usage);
                     float units = (float)(metres * MapMath.UnitsPerMetre);
+                    Target.AutoZoom = false;
                     if (Target.Mode == TargetMode.Follow) Target.FollowSpan = units;
                     else Span = units;
                     break;
                 }
+                case "autozoom":
+                    if (!Switch(out bool autoZoom)) return (false, "usage: topcam autozoom on|off   (zoom in closer when your followed group is huddled together, out as they spread)");
+                    Target.AutoZoom = autoZoom;
+                    break;
+                case "minzoom":
+                    if (a.Count != 2 || !F(1, out float minZoom) || minZoom < MapPrefs.MinZoom || minZoom > MapPrefs.MaxZoom)
+                        return (false, "usage: topcam minzoom <10..5000>   (closest metres across when your group is huddled together, with autozoom on)");
+                    Target.AutoMinSpan = minZoom * MapMath.UnitsPerMetre;
+                    break;
                 case "follow":
                 {
                     string what = a.Count == 2 ? a[1].ToLowerInvariant() : "";
@@ -1126,11 +1180,10 @@ namespace TimeLightMap
                 }
                 case "alpha":
                 {
-                    float over = 0f;
-                    bool ok = a.Count >= 2 && F(1, out float alpha) && alpha >= 0f && alpha <= 1f
+                    float goal = 0f, over = 0f;
+                    bool ok = a.Count >= 2 && F(1, out goal) && goal >= 0f && goal <= 1f
                               && (a.Count == 2 || (a.Count == 4 && (Is(2, "--over") || Is(2, "over")) && F(3, out over) && over >= 0f && over <= 600f));
                     if (!ok) return (false, "usage: topcam alpha <0..1> [--over <seconds>]   (the map's strength; 0: not drawn at all)");
-                    F(1, out float goal);
                     (_alphaFrom, _alphaGoal, _alphaStart, _alphaOver) = (_alphaNow, goal, Clock.Elapsed.TotalSeconds, over);
                     if (!(over > 1e-3f)) _alphaNow = goal;
                     FxError = null;
@@ -1206,7 +1259,7 @@ namespace TimeLightMap
                     string said = Marks.Command(a);
                     if (said == null) return (false, Usage);
                     if (said.Length > 0) return (false, said);
-                    if (Is(0, "marks") && Is(1, "on"))
+                    if (Is(0, "marks") && Marks.On)
                     {
                         FxError = null;
                         _fullBroken = false;
@@ -1240,6 +1293,8 @@ namespace TimeLightMap
             v["frame"] = MapPrefs.OnOffWord(FrameOn);
             v["follow"] = FollowWord;
             v["zoom"] = ZoomMetres.ToString("0.#", ci);
+            v["minzoom"] = (Target.AutoMinSpan / MapMath.UnitsPerMetre).ToString("0.#", ci);
+            v["autozoom"] = MapPrefs.OnOffWord(Target.AutoZoom);
             v["pitch"] = PitchAngle.Target.ToString("0.#", ci);
             v["yaw"] = yaw.ToString("0.#", ci);
             v["alpha"] = _alphaGoal.ToString("0.##", ci);
@@ -1278,7 +1333,10 @@ namespace TimeLightMap
                   .Append(' ').Append(RectH.ToString(ci));
             if (Round) sb.Append(", round");
             if (FrameOn) sb.Append(", framed");
-            sb.Append(", ").Append(MapMath.Num(ZoomMetres)).Append(" m across");
+            if (Target.AutoZoom && Target.Mode == TargetMode.Follow)
+                sb.Append(", auto-zoom ").Append(MapMath.Num(Target.AutoMinSpan / MapMath.UnitsPerMetre)).Append("..").Append(MapMath.Num(ZoomMetres)).Append(" m");
+            else
+                sb.Append(", ").Append(MapMath.Num(ZoomMetres)).Append(" m across");
             if (BigOn) sb.Append(" (x").Append(MapPrefs.BigZoom.ToString(ci)).Append(" while big)");
             sb.Append(", ").Append(FollowWord switch
             {
@@ -1321,10 +1379,10 @@ namespace TimeLightMap
             sb.Append(",\"big\":").Append(BigOn ? "true" : "false");
             sb.Append(",\"follow\":\"").Append(FollowWord).Append('"');
             sb.Append(",\"view\":{\"follow\":").Append(Follow ? "true" : "false");
-            sb.Append(",\"cx\":").Append(Cx.ToString("0.#", ci)).Append(",\"cz\":").Append(Cz.ToString("0.#", ci));
+            sb.Append(",\"cx\":").Append(MapMath.Num(Cx)).Append(",\"cz\":").Append(MapMath.Num(Cz));
             // yaw, pitch: the angles of the last drawn frame (the settings themselves while nothing is drawn)
             bool shown = On && _drawn.Valid;
-            sb.Append(",\"span\":").Append(Span.ToString("0.#", ci)).Append(",\"yaw\":").Append(MapMath.Num(shown ? _drawnYaw : YawAngle.Value, "0.##"));
+            sb.Append(",\"span\":").Append(MapMath.Num(Span)).Append(",\"yaw\":").Append(MapMath.Num(shown ? _drawnYaw : YawAngle.Value, "0.##"));
             sb.Append(",\"pitch\":").Append(MapMath.Num(shown ? _drawnPitch : PitchAngle.Value, "0.##"));
             sb.Append(",\"yawTarget\":").Append(MapMath.Num(YawAngle.Target, "0.##")).Append(",\"pitchTarget\":").Append(MapMath.Num(PitchAngle.Target, "0.##"));
             sb.Append(",\"turning\":").Append(YawAngle.Moving || PitchAngle.Moving ? "true" : "false");
@@ -1332,7 +1390,9 @@ namespace TimeLightMap
 
             sb.Append(",\"target\":{\"mode\":\"").Append(Target.Mode.ToString().ToLowerInvariant()).Append('"');
             if (Target.Mode == TargetMode.Follow)
-                sb.Append(",\"span\":").Append(MapMath.Num(Target.FollowSpan)).Append(",\"factor\":").Append(MapMath.Num(Target.SpanFactor, "0.##"))
+                sb.Append(",\"span\":").Append(MapMath.Num(Target.FollowSpan)).Append(",\"autoZoom\":").Append(Target.AutoZoom ? "true" : "false")
+                  .Append(",\"minSpan\":").Append(MapMath.Num(Target.AutoMinSpan)).Append(",\"spread\":").Append(MapMath.Num(Pack.Spread))
+                  .Append(",\"factor\":").Append(MapMath.Num(Target.SpanFactor, "0.##"))
                   .Append(",\"cx\":").Append(MapMath.Num(Target.AimCx)).Append(",\"cz\":").Append(MapMath.Num(Target.AimCz))
                   .Append(",\"aimSpan\":").Append(MapMath.Num(Target.AimSpan));
             sb.Append(",\"ease\":").Append(MapMath.Num(Target.Ease, "0.###"));

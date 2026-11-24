@@ -9,7 +9,9 @@ rect = 24 24 480 336    # x y w h in window pixels, used only with corner = free
 shape = square          # square | round
 frame = off             # on: a thin frame round the map
 follow = squad          # squad (your active squad) | selected (the people you selected) | camera (where you look) | off (stays put)
-zoom = 150              # metres across the map (10..5000)
+zoom = 150              # metres across the map (10..5000; widest zoom when autozoom is on)
+minzoom = 50            # closest metres across when your group is huddled together (with autozoom on; 10..5000)
+autozoom = on           # on: zooms in closer when your followed group is close together, out as they spread
 pitch = 90              # 90 looks straight down; lower, down to 35: tilted, heights show
 yaw = 0                 # the map's turn: 0 north up, 90 east up (0..360)
 alpha = 1               # the map's strength: 1 solid, 0.5 half see-through (0..1)

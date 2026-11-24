@@ -1,4 +1,4 @@
-Building TimeLight Map 1.3.2 from source
+Building TimeLight Map 1.4.0 from source
 ========================================
 
 You need:
@@ -15,7 +15,7 @@ Copy it into <Kenshi>/mods/. To write it elsewhere: add  -p:PackageDir=<folder>
 
 The build is deterministic: the same sources, the same .NET SDK version and the same game assemblies give the same
 DLL, byte for byte, whether the sources come from a git clone or from the source zip (.gitattributes keeps LF line
-endings; SourceLink is off). The 1.3.2 release DLL was built with the .NET SDK 9.0.321 on Linux against MeitouClient
+endings; SourceLink is off). The 1.4.0 release DLL was built with the .NET SDK 9.0.315 on Windows against MeitouClient
 0.22.0; another SDK version builds a working DLL with different bytes.
 
 Checks (the pure code: corners, sizes, the config file, layers, label and place layouts, routes, the round map, keys;

@@ -2,6 +2,47 @@
 
 All notable changes to TimeLight Map. The player's manual is [README.txt](README.txt).
 
+## 1.4.0 (2026-11-24)
+
+Built against MeitouClient 0.22.0; accepts 0.22.x (verified against 0.22.0 and 0.22.1).
+
+### New
+
+- **Group auto-zoom.** When following your squad or selected people, the map automatically eases in closer when your
+  group is huddled together and zooms smoothly back out as they spread out, between `minzoom` (default `50` m) and
+  `zoom` (default `150` m). Toggle on the Settings > Mods page (`Auto zoom` and `Close zoom`), in the config file
+  (`autozoom = on | off`, `minzoom = 50`), or in the console (`topcam autozoom on | off`, `topcam minzoom <metres>`,
+  `topcam zoom auto`). Using `topcam zoom <metres>` or the `=` / `-` hotkeys switches to manual zoom; `topcam zoom auto`
+  turns auto-zoom back on.
+
+### Improved
+
+- **Cleaner, non-overlapping squad and town labels.** Crowded squad names now split into balanced left and right wings
+  around the group instead of stacking into one tall column on one side, keeping names inside the map (including round
+  maps) and clear of the north arrow and scale bar.
+- **Leader-line avoidance for town names.** Place and town labels check against both squad label boxes and their leader
+  lines so callout lines no longer slash across nearby town names.
+- **Better text readability.** Darker backing pills behind names and place labels, new subtle backing pills behind the
+  scale bar and north arrow, softer thinner leader lines, and centered label text alignment.
+
+### Fixed
+
+- **Window clip and round-map aspect.** The map rectangle is now clipped to the output target before computing render
+  size and aspect, preventing squashed renders or stale hit rects when the map is hidden, minimized, or off-screen.
+- **Stale shown-frame stamp on early returns.** Returning early (map off, loading/menu frames, open render pass, zero
+  window size) now clears the shown stamp so HUD clipping and overlays do not stick on a hidden map.
+- **`topcam reset` completeness.** Now restores `big`, `ease`, `flip`, `shadows`, `fog`, `haze`, `wide`, `exposure`,
+  `clip`, and mark defaults (including cone reach/fill) in addition to the startup config keys.
+- **Settings page corner & custom-key handling.** Switching from `corner = free` to a corner now applies the page's size
+  and config margin cleanly; custom hotkeys read from the config file rather than overwritten runtime values; `topcam save
+  file` only claims a `.bak` was written when an existing config file was actually backed up.
+- **Sky eye position restore.** Restores `Sky.EyePosition` alongside the haze/fog fields after the top-down pass so the
+  main view's atmosphere never sees the map camera's eye.
+- **Non-finite camera guard and status JSON.** Guards against non-finite camera target coordinates and formats `cx`, `cz`,
+  and `span` through `MapMath.Num` so `topcam status` never emits invalid JSON.
+- **Marks re-enable & alpha parser cleanup.** Re-enabling marks via any accepted truthy word (`true`, `yes`, `1`) clears
+  prior shader error flags; removed duplicate `alpha` parse.
+
 ## 1.3.2 (2026-11-19)
 
 Built against MeitouClient 0.22.0; accepts 0.22.x. The map itself is unchanged: every game method it hooks is

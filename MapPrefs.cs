@@ -25,11 +25,11 @@ namespace TimeLightMap
         public const int DefaultCorner = 2;                                // top right
         public const int DefaultMargin = 24, MaxMargin = 400;
         public const double MinZoom = 10, MaxZoom = 5000;                  // metres across the map
-        public const double DefaultZoom = 150;
+        public const double DefaultZoom = 150, DefaultMinZoom = 50;
         public const double ZoomStep = 1.5;                                // 'topcam zoom in' / 'out' (and the hotkeys)
 
         public const string Words = "corner <top-left|top-right|bottom-left|bottom-right|free> [small|medium|large|<10..60>] | size <small|medium|large|<10..60>>"
-                                    + " | margin <0..400> | zoom <10..5000 metres across>|in|out | follow squad|selected|camera|off";
+                                    + " | margin <0..400> | zoom <10..5000 metres across>|in|out|auto | minzoom <10..5000> | autozoom on|off | follow squad|selected|camera|off";
 
         // =====================================================================================================
         //  words
@@ -313,7 +313,9 @@ namespace TimeLightMap
             new Opt("shape", "square", "square | round"),
             new Opt("frame", "off", "on: a thin frame round the map"),
             new Opt("follow", "squad", "squad (your active squad) | selected (the people you selected) | camera (where you look) | off (stays put)"),
-            new Opt("zoom", "150", "metres across the map (10..5000)"),
+            new Opt("zoom", "150", "metres across the map (10..5000; widest zoom when autozoom is on)"),
+            new Opt("minzoom", "50", "closest metres across when your group is huddled together (with autozoom on; 10..5000)"),
+            new Opt("autozoom", "on", "on: zooms in closer when your followed group is close together, out as they spread"),
             new Opt("pitch", "90", "90 looks straight down; lower, down to 35: tilted, heights show"),
             new Opt("yaw", "0", "the map's turn: 0 north up, 90 east up (0..360)"),
             new Opt("alpha", "1", "the map's strength: 1 solid, 0.5 half see-through (0..1)"),
@@ -402,7 +404,8 @@ namespace TimeLightMap
                 }
                 values[key] = value;
             }
-            if (!OnOff(values["map"], out _))
+            if (OnOff(values["map"], out bool mapOn)) values["map"] = OnOffWord(mapOn);
+            else
             {
                 faults.Add("map: on or off, not '" + values["map"] + "'");
                 values["map"] = "on";
@@ -418,7 +421,7 @@ namespace TimeLightMap
             string v = (value ?? "").Trim();
             switch (key)
             {
-                case "map": list.Add(new[] { v.ToLowerInvariant() }); break;
+                case "map": list.Add(new[] { OnOff(v, out bool mapOn) ? OnOffWord(mapOn) : v.ToLowerInvariant() }); break;
                 case "rect":
                     if (freeCorner && RectText(v, out int x, out int y, out int w, out int h))
                         list.Add(new[] { "rect", x.ToString(Ci), y.ToString(Ci), w.ToString(Ci), h.ToString(Ci) });

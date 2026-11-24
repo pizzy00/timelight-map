@@ -132,6 +132,16 @@ static class V130Checks
         Check(Flat(MapPrefs.CommandsOf("key_big", "Shift+N", false)) == "bind big Shift+N" && MapPrefs.CommandsOf("rect", "1 2 30 40", false).Count == 0
               && Flat(MapPrefs.CommandsOf("hostiles", "off", false)) == "layer foes off" && Flat(MapPrefs.CommandsOf("places", "on", false)) == "layer towns on",
             "single options as commands (the settings page's changes)");
+        // map = true/false/yes/no/1/0 normalise to on/off so TopCam.Command accepts them
+        bool mapNorm = true;
+        foreach (var (word, want) in new[] { ("true", "on"), ("false", "off"), ("yes", "on"), ("no", "off"), ("1", "on"), ("0", "off") })
+        {
+            var cmds = MapPrefs.Commands("map = " + word, out var mf);
+            mapNorm &= mf.Count == 0 && cmds[^1].Length == 1 && cmds[^1][0] == want;
+            var one = MapPrefs.CommandsOf("map", word, false);
+            mapNorm &= one.Count == 1 && one[0].Length == 1 && one[0][0] == want;
+        }
+        Check(mapNorm, "map = true/false/yes/no/1/0 becomes the command 'on' or 'off'");
         Check(MapPrefs.Commands(MapPrefs.Defaults()).Count == MapPrefs.Commands(null, out _).Count, "the options as values and as a file give the same commands");
     }
 
@@ -223,6 +233,79 @@ static class V130Checks
             }
         }
         Check(clean && shown > 300, "a round map: 300 random frames, every shown place name inside the circle (" + shown + " shown)");
+
+        // round-map squad labels: a dot near the curved right rim flips its name left to stay inside the circle
+        var lbl = new LabelLayout { CircleR = 149.5f, Count = 1 };
+        (lbl.Key[0], lbl.DotX[0], lbl.DotY[0], lbl.DotR[0], lbl.W[0], lbl.H[0]) = (1, 225, 70, 5, 65, 20);
+        lbl.Solve(300, 300);
+        Check(lbl.Left[0] && MapShape.BoxInCircle(lbl.X[0], lbl.Y[0], lbl.X[0] + lbl.W[0], lbl.Y[0] + lbl.H[0], 150, 150, 148.5f),
+            "round map: a name near the curved right rim goes left to stay inside the circle");
+
+        // round-map stacked column near the curved right rim also flips left
+        lbl.Forget();
+        lbl.Count = 2;
+        (lbl.Key[0], lbl.DotX[0], lbl.DotY[0], lbl.DotR[0], lbl.W[0], lbl.H[0]) = (1, 220, 75, 5, 65, 20);
+        (lbl.Key[1], lbl.DotX[1], lbl.DotY[1], lbl.DotR[1], lbl.W[1], lbl.H[1]) = (2, 224, 80, 5, 65, 20);
+        lbl.Solve(300, 300);
+        Check(lbl.Stacked[0] && lbl.Left[0] && MapShape.BoxInCircle(lbl.X[0], lbl.Y[0], lbl.X[0] + lbl.W[0], lbl.Y[0] + lbl.H[0], 150, 150, 148.5f)
+              && MapShape.BoxInCircle(lbl.X[1], lbl.Y[1], lbl.X[1] + lbl.W[1], lbl.Y[1] + lbl.H[1], 150, 150, 148.5f),
+            "round map: a crowded column near the curved right rim goes left inside the circle");
+
+        // Spring ignores non-finite dt or target (never poisons to NaN)
+        var sp = new Spring();
+        sp.Reset(42);
+        sp.Step(100, 0.5, double.PositiveInfinity);
+        sp.Step(double.NaN, 0.5, 0.016);
+        Check(sp.Value == 42 && sp.Velocity == 0, "spring: non-finite dt or target leaves state intact");
+
+        // KnownPlaces.Near keeps an elevated/valley town visible on a tilted zoomed-in view
+        var tilted = new MapView { Cx = 0, Cy = 0, Cz = 0, Span = 300, SpanZ = 210, Valid = true };
+        tilted.Angles(0, 35);
+        tilted.ToPixel(0, -300, -400, 300, 210, out float tpx, out float tpy);
+        Check(tpx >= 0 && tpx <= 300 && tpy >= 0 && tpy <= 210 && KnownPlaces.Near(tilted, 0, -400),
+            "tilted zoomed-in view: a valley town visible on screen passes KnownPlaces.Near");
+
+        // 11-person squad in a 320x320 round map with Scale bar, North arrow, and Catun place label:
+        // splits into two balanced wings, stays inside the circle and clear of chrome, and Catun never crosses a leader line
+        const float dim = 320f, rad = 159.5f;
+        var squad = new LabelLayout { CircleR = rad, Count = 11 };
+        float[] widths = { 58, 44, 34, 44, 44, 44, 44, 44, 48, 80, 72 };
+        for (int i = 0; i < 11; i++)
+            (squad.Key[i], squad.DotX[i], squad.DotY[i], squad.DotR[i], squad.W[i], squad.H[i]) =
+                (i + 1, 158f + (i % 3) * 3f, 158f + (i / 3) * 2f, i == 0 ? 6f : 5f, widths[i], 20f);
+        float scaleY0 = dim * 0.5f + rad * 0.80f - 20f;
+        squad.AddObstacle(dim * 0.15f, scaleY0, dim * 0.85f, dim);
+        squad.AddObstacle(225f, 12f, 273f, 64f);
+        squad.Solve(dim, dim);
+        int leftWing = 0, rightWing = 0;
+        bool allIn = true, clearChrome = true, noLabelOverlap = true;
+        for (int i = 0; i < 11; i++)
+        {
+            if (squad.Left[i]) leftWing++; else rightWing++;
+            allIn &= MapShape.BoxInCircle(squad.X[i], squad.Y[i], squad.X[i] + squad.W[i], squad.Y[i] + squad.H[i], dim * 0.5f, dim * 0.5f, rad - 1f);
+            clearChrome &= squad.Y[i] + squad.H[i] <= scaleY0;
+            for (int j = i + 1; j < 11; j++)
+                if (squad.X[i] < squad.X[j] + squad.W[j] && squad.X[j] < squad.X[i] + squad.W[i]
+                    && squad.Y[i] < squad.Y[j] + squad.H[j] && squad.Y[j] < squad.Y[i] + squad.H[i]) noLabelOverlap = false;
+        }
+        Check(squad.Clusters == 1 && leftWing == 5 && rightWing == 6 && allIn && clearChrome && noLabelOverlap,
+            "11-person round map: balanced 6+5 wings, all inside circle, clear of scale bar, zero overlaps");
+
+        // PlaceLayout avoids squad leader lines (Catun near the squad knot never has leader lines slashing through it)
+        var pl = new PlaceLayout { CircleR = rad, Count = 1 };
+        pl.AddObstacle(dim * 0.15f, scaleY0, dim * 0.85f, dim);
+        pl.AddObstacle(225f, 12f, 273f, 64f);
+        for (int i = 0; i < 11; i++)
+        {
+            pl.AddObstacle(squad.DotX[i] - 8f, squad.DotY[i] - 8f, squad.DotX[i] + 8f, squad.DotY[i] + 8f);
+            pl.AddObstacle(squad.X[i] - 4f, squad.Y[i], squad.X[i] + squad.W[i] + 4f, squad.Y[i] + squad.H[i]);
+            pl.AddLineObstacle(squad.DotX[i], squad.DotY[i], squad.LeadX[i], squad.LeadY[i]);
+        }
+        pl.Key[0] = PlaceLayout.KeyOf("Catun", 0, 0);
+        (pl.AnchorX[0], pl.AnchorY[0], pl.Above[0], pl.W[0], pl.H[0], pl.Priority[0]) = (160f, 165f, 7f, 52f, 20f, 1);
+        pl.Solve(dim, dim);
+        Check(pl.Shown[0] && MapShape.BoxInCircle(pl.X[0], pl.Y[0], pl.X[0] + pl.W[0], pl.Y[0] + pl.H[0], dim * 0.5f, dim * 0.5f, rad - 1f),
+            "Catun beside 11-person cluster: shown inside circle, clear of names, dots and leader lines");
     }
 
     static void BigFollow()
@@ -238,5 +321,27 @@ static class V130Checks
         t.SpanFactor = 1;
         for (int i = 0; i < 300; i++) t.Step(1 / 60.0, true, 0, 0);
         Check(Math.Abs(t.Span - 1000) < 0.5 && t.FollowSpan == 1000, "back from the big map: the span it had");
+
+        // auto-zoom: tight huddle zooms in to AutoMinSpan (50 m), spreads smoothly out, ignores a lone straggler, big map overrides
+        var xs = new double[] { 0, 15, -15, 5000 };
+        var zs = new double[] { 0, 10, -10, 0 };
+        double spread = MapMath.Spread(xs, zs, 4, 0, 1200, 1800, 0, 0);
+        Check(spread > 15 && spread < 20, "spread ignores a straggler 500 m away (" + spread.ToString("0.0") + ")");
+        var az = new ViewTarget { Mode = TargetMode.Follow, FollowSpan = 1500, AutoZoom = true, AutoMinSpan = 500, Ease = 0.5 };
+        az.Step(1 / 60.0, true, 100, 200, 18);
+        Check(Math.Abs(az.Span - 500) < 1 && Math.Abs(az.AimSpan - 500) < 1, "auto-zoom cold start on tight group: 50 m across (" + az.Span.ToString("0") + ")");
+        // minor shuffle stays within deadband (no pumping)
+        az.Step(1 / 60.0, true, 100, 200, 50);
+        Check(Math.Abs(az.AimSpan - 500) < 1, "auto-zoom deadband holds steady on small shuffle");
+        // group spreads out to 20 m radius: glides out to ~89 m (890 units)
+        for (int i = 0; i < 600; i++) az.Step(1 / 60.0, true, 100, 200, 200);
+        Check(Math.Abs(az.Span - 890) < 2, "auto-zoom spreads out smoothly to 89 m (" + az.Span.ToString("0") + ")");
+        // big map overrides auto-zoom to FollowSpan x 3 = 450 m, then closing glides back to tight group
+        az.SpanFactor = 3;
+        for (int i = 0; i < 600; i++) az.Step(1 / 60.0, true, 100, 200, 18);
+        Check(Math.Abs(az.Span - 4500) < 5, "big map overrides auto-zoom to 3x max zoom (" + az.Span.ToString("0") + ")");
+        az.SpanFactor = 1;
+        for (int i = 0; i < 600; i++) az.Step(1 / 60.0, true, 100, 200, 18);
+        Check(Math.Abs(az.Span - 500) < 2, "closing big map glides back into tight 50 m group (" + az.Span.ToString("0") + ")");
     }
 }

@@ -34,7 +34,7 @@ namespace TimeLightMap
         public static readonly CharacterSnapshot[] Who = new CharacterSnapshot[Max];
         public static readonly double[] X = new double[Max], Y = new double[Max], Z = new double[Max];
         public static bool HasCentre;
-        public static double CentreX, CentreY, CentreZ;
+        public static double CentreX, CentreY, CentreZ, Spread;
 
         static readonly Dictionary<long, int> Index = new Dictionary<long, int>();
         static readonly CharacterSnapshot[] _who = new CharacterSnapshot[Max];
@@ -48,6 +48,7 @@ namespace TimeLightMap
             for (int i = 0; i < Count; i++) Who[i] = null;
             Count = Squad = Followed = 0;
             HasCentre = false;
+            Spread = 0;
         }
 
         public static void Read(GameHost host, FollowWho who)
@@ -102,6 +103,7 @@ namespace TimeLightMap
             // game named no squad), weighted round its first man
             HasCentre = false;
             Followed = 0;
+            Spread = 0;
             if (who == FollowWho.Selected)
             {
                 int m = 0, anchor = 0;
@@ -116,11 +118,13 @@ namespace TimeLightMap
                 {
                     Followed = m;
                     HasCentre = MapMath.Centroid(_x, _y, _z, m, anchor, Near, Far, out CentreX, out CentreY, out CentreZ);
+                    if (HasCentre) Spread = MapMath.Spread(_x, _z, m, anchor, Near, Far, CentreX, CentreZ);
                     return;
                 }
             }
             Followed = Squad > 0 ? Squad : Count;
             HasCentre = MapMath.Centroid(X, Y, Z, Followed, 0, Near, Far, out CentreX, out CentreY, out CentreZ);
+            if (HasCentre) Spread = MapMath.Spread(X, Z, Followed, 0, Near, Far, CentreX, CentreZ);
         }
 
         static void Put(int to, int from) => (Who[to], X[to], Y[to], Z[to]) = (_who[from], _x[from], _y[from], _z[from]);
@@ -146,7 +150,7 @@ namespace TimeLightMap
         const float PalSquad = 0, PalLeader = 1, PalHostile = 2, PalRing = 3, PalLead = 4, PalChrome = 5, PalPlace = 6,
             PalConeFill = 7, PalConeEdge = 8, PalConeArc = 9, PalBack = 10, PalOther = 11, PalRoute = 12, PalRouteFar = 13,
             PalHurt = 14, PalHurtBad = 15;
-        const float BackAlpha = 0.5f;           // the dark bar behind each text on the map (so it reads on bright ground)
+        const float BackAlpha = 0.74f;          // the dark pill behind each text on the map (so it reads on bright ground)
         public const int PaletteSlots = 32;
         public const float ConeMinPx = 30f;     // the shortest view cone on the map, pixels
         public const float ArrowReach = 10f;    // a heading arrow's tip stands this far out from the edge of the dot
@@ -183,13 +187,13 @@ namespace TimeLightMap
                 1.00f, 0.80f, 0.32f, 1f,      // 1 leader: gold
                 0.93f, 0.16f, 0.13f, 1f,      // 2 hostile: red
                 1.00f, 1.00f, 1.00f, 0.95f,   // 3 ring (selected)
-                1.00f, 1.00f, 1.00f, 0.55f,   // 4 leader lines
+                0.90f, 0.93f, 0.98f, 0.40f,   // 4 leader lines (subtle so crowded clusters stay readable)
                 1.00f, 1.00f, 1.00f, 0.92f,   // 5 scale bar, north
                 0.98f, 0.92f, 0.74f, 0.95f,   // 6 place marks
                 1.00f, 0.82f, 0.48f, 0.18f,   // 7 the camera's view cone, inside (it fades to a third of this at its far edge)
                 1.00f, 0.82f, 0.48f, 0.95f,   // 8 its two sides (dotted)
                 1.00f, 0.82f, 0.48f, 0.70f,   // 9 its far edge (dotted)
-                0.03f, 0.03f, 0.035f, BackAlpha, // 10 the dark bar behind a text
+                0.02f, 0.02f, 0.03f, BackAlpha, // 10 the dark pill behind a text
                 0.74f, 0.78f, 0.84f, 0.95f,   // 11 the player's people in other squads: grey-blue
                 0.50f, 0.86f, 1.00f, 0.95f,   // 12 a route (dotted) and its end
                 0.50f, 0.86f, 1.00f, 0.45f,   // 13 a route's provisional, long-range part
@@ -231,10 +235,10 @@ namespace TimeLightMap
             alpha = Math.Clamp(alpha, 0, 100);
             return StylesByAlpha[alpha] ??= new[]
             {
-                Style("0.96 0.96 0.94", "Left VCenter", alpha),
-                Style("1 0.84 0.42", "Left VCenter", alpha),
-                Style("0.98 0.92 0.74", "Center", alpha),
-                Style("1 1 1", "Left VCenter", alpha),
+                Style("0.98 0.98 0.96", "Center", alpha),
+                Style("1 0.85 0.40", "Center", alpha),
+                Style("1 0.93 0.68", "Center", alpha),
+                Style("1 1 1", "Center", alpha),
             };
         }
 
@@ -386,8 +390,15 @@ namespace TimeLightMap
             return float.IsFinite(h) ? h : v.Cy;
         }
 
-        static bool Inside(float px, float py, float rw, float rh, float inset) =>
-            px >= inset && py >= inset && px <= rw - inset && py <= rh - inset;
+        static bool Inside(float px, float py, float rw, float rh, float inset)
+        {
+            if (px < inset || py < inset || px > rw - inset || py > rh - inset) return false;
+            if (!_round) return true;
+            float r = _radius - inset;
+            if (!(r > 0f)) return false;
+            float dx = px - rw * 0.5f, dy = py - rh * 0.5f;
+            return dx * dx + dy * dy <= r * r;
+        }
 
         /// <summary>Where the scale bar starts and stands: the bottom left; on a round map the bottom middle (bar and text
         /// centred together).</summary>
@@ -401,16 +412,38 @@ namespace TimeLightMap
             (x0, y) = (12f, rh - 13f);
         }
 
-        /// <summary>Where the N arrow stands: the top right; on a round map on the rim, 40 degrees right of the top.</summary>
-        static void NorthSpot(float rw, float rh, out float cx, out float cy)
+        /// <summary>Where the N arrow stands and points: the top right; on a round map on the rim, 40 degrees right of the top.
+        /// Shifted inward only if a non-zero yaw would push the "N" text off the edge or out of the circle.</summary>
+        static void NorthSpot(in MapView v, float rw, float rh, out float cx, out float cy, out float nx, out float ny)
         {
+            v.DirToPixel(0, -1, rw, rh, out nx, out ny);
+            float len = MathF.Sqrt(nx * nx + ny * ny);
+            if (len > 1e-6f) (nx, ny) = (nx / len, ny / len);
+            else (nx, ny) = (0f, -1f);
             if (_round)
             {
-                float r = _radius - 20f, a = 40f * MathF.PI / 180f;
+                float r = MathF.Max(0f, _radius - 20f), a = 40f * MathF.PI / 180f;
                 (cx, cy) = (rw * 0.5f + MathF.Sin(a) * r, rh * 0.5f - MathF.Cos(a) * r);
-                return;
             }
-            (cx, cy) = (rw - 17f, 19f);
+            else (cx, cy) = (rw - 17f, 19f);
+
+            Size("N", out float tw, out float th);
+            float tx = cx - nx * 15f - tw * 0.5f, ty = cy - ny * 15f - th * 0.5f;
+            if (_round)
+            {
+                if (!Fits(tx, ty, tw, th))
+                {
+                    float r = MathF.Max(0f, _radius - 32f - MathF.Max(tw, th) * 0.5f), a = 40f * MathF.PI / 180f;
+                    (cx, cy) = (rw * 0.5f + MathF.Sin(a) * r, rh * 0.5f - MathF.Cos(a) * r);
+                }
+            }
+            else
+            {
+                if (tx < 2f) cx += 2f - tx;
+                else if (tx + tw > rw - 2f) cx -= tx + tw - (rw - 2f);
+                if (ty < 2f) cy += 2f - ty;
+                else if (ty + th > rh - 2f) cy -= ty + th - (rh - 2f);
+            }
         }
 
         static void ScaleBar(in MapView v, float rw, float rh)
@@ -429,26 +462,26 @@ namespace TimeLightMap
             Shape(Line, x0, y, x0 + len, y, 2.4f, PalChrome, 1f);
             Shape(Line, x0, y - 5f, x0, y + 1f, 2f, PalChrome, 1f);
             Shape(Line, x0 + len, y - 5f, x0 + len, y + 1f, 2f, PalChrome, 1f);
-            Text(_scaleText, x0 + len + 7f, y - th * 0.5f - 2f, tw, th, StyleChrome);
+            float tx = x0 + len + 7f, ty = y - th * 0.5f - 2f;
+            Backing(tx, ty, tw, th);
+            Text(_scaleText, tx, ty, tw, th, StyleChrome);
         }
 
         static void North(in MapView v, float rw, float rh)
         {
-            v.DirToPixel(0, -1, rw, rh, out float nx, out float ny);
-            float len = MathF.Sqrt(nx * nx + ny * ny);
-            if (len > 1e-6f) (nx, ny) = (nx / len, ny / len);
-            else (nx, ny) = (0f, -1f);
-            NorthSpot(rw, rh, out float cx, out float cy);
+            NorthSpot(v, rw, rh, out float cx, out float cy, out float nx, out float ny);
             Shape(Triangle, cx + nx * 8f, cy + ny * 8f, nx, ny, 15f, PalChrome, 5.5f);
             Size("N", out float tw, out float th);
-            Text("N", cx - nx * 15f - tw * 0.5f + 1f, cy - ny * 15f - th * 0.5f, tw, th, StyleChrome);
+            float tx = cx - nx * 15f - tw * 0.5f, ty = cy - ny * 15f - th * 0.5f;
+            Backing(tx, ty, tw, th);
+            Text("N", tx, ty, tw, th, StyleChrome);
         }
 
         /// <summary>The place labels (the "towns" layer): the game's own discovered towns and places (GamePlaces), each a
-        /// diamond with its name. The texts are laid out by PlaceLayout round your people's names and dots (laid out first,
-        /// this frame), the scale bar, the N, each other and the other labels' marks: above the mark where there is room,
-        /// else the nearest free spot with a thin leader line, else dropped (small places before towns); a dark bar behind each.
-        /// On a round map every text stays inside the circle.</summary>
+        /// diamond with its name. The texts are laid out by PlaceLayout round your people's names, dots and leader lines
+        /// (laid out first, this frame), the scale bar, the N, each other and the other labels' marks: above the mark where
+        /// there is room, else the nearest free spot with a thin leader line, else dropped (small places before towns); a dark
+        /// pill behind each. On a round map every text stays inside the circle.</summary>
         static void Places(GameHost host, in MapView v, float rw, float rh, int lay)
         {
             var pl = PlaceSpots;
@@ -457,21 +490,32 @@ namespace TimeLightMap
             var layout = Layout;
             for (int j = 0; j < _people; j++)
             {
-                float r = _dotR[j] + 2f;
+                float r = _dotR[j] + 3f;
                 pl.AddObstacle(_dotX[j] - r, _dotY[j] - r, _dotX[j] + r, _dotY[j] + r);
             }
             if (_sqNames)
                 for (int j = 0; j < layout.Count; j++)
-                    if (layout.W[j] > 0) pl.AddObstacle(layout.X[j], layout.Y[j], layout.X[j] + layout.W[j], layout.Y[j] + layout.H[j]);
+                {
+                    if (!(layout.W[j] > 0) || !Fits(layout.X[j], layout.Y[j], layout.W[j], layout.H[j])) continue;
+                    // include the dark pill's horizontal caps so place labels never graze a squad name's pill
+                    pl.AddObstacle(layout.X[j] - 4f, layout.Y[j], layout.X[j] + layout.W[j] + 4f, layout.Y[j] + layout.H[j]);
+                    if (layout.Stacked[j])
+                    {
+                        float dx = layout.LeadX[j] - layout.DotX[j], dy = layout.LeadY[j] - layout.DotY[j], len = MathF.Sqrt(dx * dx + dy * dy);
+                        float from = layout.DotR[j] + 1.5f;
+                        if (len > from + 2f)
+                            pl.AddLineObstacle(layout.DotX[j] + dx / len * from, layout.DotY[j] + dy / len * from, layout.LeadX[j], layout.LeadY[j]);
+                    }
+                }
             if (MapLayers.On(lay, MapLayers.Scale))
             {
-                if (_round) pl.AddObstacle(rw * 0.2f, rh * 0.5f + _radius * 0.80f - 18f, rw * 0.8f, rh);
-                else pl.AddObstacle(0f, rh - 32f, rw * 0.42f, rh);
+                if (_round) pl.AddObstacle(rw * 0.15f, rh * 0.5f + _radius * 0.80f - 20f, rw * 0.85f, rh);
+                else pl.AddObstacle(0f, rh - 34f, rw * 0.42f, rh);
             }
             if (MapLayers.On(lay, MapLayers.North))
             {
-                NorthSpot(rw, rh, out float nx, out float ny);
-                pl.AddObstacle(nx - 23f, ny - 25f, nx + 23f, ny + 25f);
+                NorthSpot(v, rw, rh, out float nx, out float ny, out _, out _);
+                pl.AddObstacle(nx - 24f, ny - 26f, nx + 24f, ny + 26f);
             }
             int n = MapLayers.On(lay, MapLayers.Towns) ? GamePlacesLayer(host, v, rw, rh) : 0;
             if (n == 0) LastGamePlaces = 0;
@@ -583,12 +627,12 @@ namespace TimeLightMap
             n++;
         }
 
-        /// <summary>A dark rounded bar behind a text (a wide line of the shader), so it reads on bright ground.</summary>
+        /// <summary>A dark rounded pill behind a text (a wide line of the shader), so it reads on bright ground.</summary>
         static void Backing(float x, float y, float w, float h)
         {
             if (!(w > 0) || !(h > 0) || !Fits(x, y, w, h)) return;
-            float r = h * 0.42f, cy = y + h * 0.5f;
-            Shape(Line, x + r * 0.6f, cy, x + w - r * 0.6f, cy, h * 0.86f, PalBack, 0f);
+            float thick = h * 0.94f, inset = Math.Clamp(thick * 0.5f - 4f, 0f, w * 0.5f), cy = y + h * 0.5f;
+            Shape(Line, x + inset, cy, x + w - inset, cy, thick, PalBack, 0f);
         }
 
         /// <summary>A red dot on every character the game counts as hostile to the player or fighting the player, awake
@@ -707,18 +751,27 @@ namespace TimeLightMap
                         plan.Add(px, py, j >= exact);
                     }
                     if (!plan.Finish()) continue;
+                    float ex = plan.X[plan.Count - 1], ey = plan.Y[plan.Count - 1];
+                    bool endOn = Inside(ex, ey, rw, rh, -8f);
+                    int before = ShapeCount;
+                    int savedLimit = _limit;
+                    if (endOn) _limit = Math.Max(ShapeCount, savedLimit - 2);      // keep room for the destination ring and dot
                     // the dots are counted from the end, so they stand still on the ground while he walks
                     float along = 0f;
                     for (int j = plan.Count - 1; j >= 1; j--)
                     {
                         float x0 = plan.X[j - 1], y0 = plan.Y[j - 1], x1 = plan.X[j], y1 = plan.Y[j];
-                        Shape(Dots, x0, y0, x1, y1, 2f, plan.Far[j] ? PalRouteFar : PalRoute, along);
+                        if (MathF.Max(x0, x1) >= -4f && MathF.Min(x0, x1) <= rw + 4f && MathF.Max(y0, y1) >= -4f && MathF.Min(y0, y1) <= rh + 4f)
+                            Shape(Dots, x0, y0, x1, y1, 2f, plan.Far[j] ? PalRouteFar : PalRoute, along);
                         along += MathF.Sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
                     }
-                    float ex = plan.X[plan.Count - 1], ey = plan.Y[plan.Count - 1];
-                    Shape(Ring, ex, ey, 5.5f, 1.8f, 0f, PalRoute, 0f);
-                    Shape(Disc, ex, ey, 1.8f, 0f, 0f, PalRoute, 0f);
-                    LastRoutes++;
+                    _limit = savedLimit;
+                    if (endOn)
+                    {
+                        Shape(Ring, ex, ey, 5.5f, 1.8f, 0f, PalRoute, 0f);
+                        Shape(Disc, ex, ey, 1.8f, 0f, 0f, PalRoute, 0f);
+                    }
+                    if (ShapeCount > before) LastRoutes++;
                 }
             }
             finally
@@ -795,6 +848,18 @@ namespace TimeLightMap
                 catch (Exception e) { arrows = ArrowsFail(e); }
             }
             _people = k;
+            layout.CircleR = _round ? _radius : 0f;
+            layout.ClearObstacles();
+            if (MapLayers.On(lay, MapLayers.Scale))
+            {
+                if (_round) layout.AddObstacle(rw * 0.15f, rh * 0.5f + _radius * 0.80f - 20f, rw * 0.85f, rh);
+                else layout.AddObstacle(0f, rh - 34f, rw * 0.42f, rh);
+            }
+            if (MapLayers.On(lay, MapLayers.North))
+            {
+                NorthSpot(v, rw, rh, out float nx, out float ny, out _, out _);
+                layout.AddObstacle(nx - 24f, ny - 26f, nx + 24f, ny + 26f);
+            }
             layout.Count = labels;
             if (labels > 0) layout.Solve(rw, rh);
             LastSquad = k - others;
@@ -821,7 +886,7 @@ namespace TimeLightMap
                     float from = layout.DotR[j] + 1.5f;
                     if (len <= from + 2f) continue;
                     if (!Fits(layout.X[j], layout.Y[j], layout.W[j], layout.H[j])) continue;      // its name is not shown
-                    Shape(Line, layout.DotX[j] + dx / len * from, layout.DotY[j] + dy / len * from, layout.LeadX[j], layout.LeadY[j], 1.3f, PalLead, 0f);
+                    Shape(Line, layout.DotX[j] + dx / len * from, layout.DotY[j] + dy / len * from, layout.LeadX[j], layout.LeadY[j], 1.0f, PalLead, 0f);
                 }
             if (arrows)
                 for (int j = 0; j < k; j++)      // under the dots
@@ -944,6 +1009,17 @@ namespace TimeLightMap
         {
             v = 0;
             return i < a.Count && double.TryParse(a[i], NumberStyles.Float, Ci, out v) && double.IsFinite(v);
+        }
+
+        /// <summary>Resets console-only mark tuning back to the defaults ('topcam reset').</summary>
+        public static void ResetDefaults()
+        {
+            ConeReach = ViewCone.DefaultReach;
+            if (Palette[(int)PalConeFill * 4 + 3] != 0.18f)
+            {
+                Palette[(int)PalConeFill * 4 + 3] = 0.18f;
+                PaletteVersion++;
+            }
         }
 
         /// <summary>Switches one layer, clearing the error that switched it off before when it comes back on.</summary>

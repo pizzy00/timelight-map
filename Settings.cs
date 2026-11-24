@@ -53,8 +53,14 @@ namespace TimeLightMap
             Options = new[] { "squad", "selected", "camera", "off" })]
         public string Follow { get; set; } = "squad";
 
-        [Setting("Zoom", Hint = "Metres across the map (the zoom keys change it while you play)", Min = 10, Max = 5000, Step = 10)]
+        [Setting("Zoom", Hint = "Metres across the map (widest zoom when Auto zoom is on; the zoom keys change it while you play)", Min = 10, Max = 5000, Step = 10)]
         public float Zoom { get; set; } = 150f;
+
+        [Setting("Auto zoom", Hint = "Zooms in closer when your followed group is huddled together, out as they spread")]
+        public bool AutoZoom { get; set; } = true;
+
+        [Setting("Close zoom", Hint = "Closest metres across when your group is tightly grouped (with Auto zoom on)", Min = 10, Max = 500, Step = 5)]
+        public float MinZoom { get; set; } = 50f;
 
         [Setting("Tilt", Hint = "90 looks straight down; lower tilts the view so heights show", Min = 35, Max = 90, Step = 1)]
         public float Pitch { get; set; } = 90f;
@@ -120,7 +126,7 @@ namespace TimeLightMap
         internal static readonly (string Property, string Key)[] Rows =
         {
             ("Map", "map"), ("Corner", "corner"), ("Size", "size"), ("Shape", "shape"), ("Frame", "frame"), ("Follow", "follow"),
-            ("Zoom", "zoom"), ("Pitch", "pitch"), ("Alpha", "alpha"), ("Quality", "quality"), ("Marks", "marks"), ("Names", "names"),
+            ("Zoom", "zoom"), ("AutoZoom", "autozoom"), ("MinZoom", "minzoom"), ("Pitch", "pitch"), ("Alpha", "alpha"), ("Quality", "quality"), ("Marks", "marks"), ("Names", "names"),
             ("Hostiles", "hostiles"), ("Places", "places"), ("Cone", "cone"), ("Arrows", "arrows"), ("Routes", "routes"), ("Hurt", "hurt"),
             ("ScaleBar", "scale"), ("North", "north"), ("TextScale", "textscale"), ("HideWithUi", "hidewithui"), ("Keys", "keys"),
             ("KeyToggle", "key_toggle"), ("KeyBig", "key_big"), ("KeyZoomIn", "key_zoomin"), ("KeyZoomOut", "key_zoomout"),
@@ -166,6 +172,8 @@ namespace TimeLightMap
                 case "frame": Frame = Switch(text, false); break;
                 case "follow": Follow = Pick(FollowOptions, text, "squad"); break;
                 case "zoom": Zoom = Number(text, (float)MapPrefs.MinZoom, (float)MapPrefs.MaxZoom, (float)MapPrefs.DefaultZoom); break;
+                case "autozoom": AutoZoom = Switch(text, true); break;
+                case "minzoom": MinZoom = Number(text, (float)MapPrefs.MinZoom, 500f, (float)MapPrefs.DefaultMinZoom); break;
                 case "pitch": Pitch = Number(text, TopCam.MinPitch, 90f, 90f); break;
                 case "alpha": Alpha = Number(text, 0.1f, 1f, 1f); break;
                 case "quality": Quality = Pick(QualityOptions, text, "high"); break;
@@ -199,6 +207,8 @@ namespace TimeLightMap
             "frame" => MapPrefs.OnOffWord(Frame),
             "follow" => Follow,
             "zoom" => Zoom.ToString("0.#", Ci),
+            "autozoom" => MapPrefs.OnOffWord(AutoZoom),
+            "minzoom" => MinZoom.ToString("0.#", Ci),
             "pitch" => Pitch.ToString("0.#", Ci),
             "alpha" => Alpha.ToString("0.##", Ci),
             "quality" => Quality,
@@ -242,7 +252,8 @@ namespace TimeLightMap
         static string _modId, _folder;
         static MapSettings _settings;
         static ModSettingsGroup _group;
-        static Dictionary<string, string> _start;      // the options the map started with
+        static Dictionary<string, string> _file;       // the config file's own values (for 'custom' hotkeys and margin)
+        static bool _startedFree;
 
         /// <summary>In IMod.Initialize: reads the config file, registers the settings page (which applies the saved values),
         /// and hands the result to the map (TopCam.StartWith).</summary>
@@ -262,6 +273,7 @@ namespace TimeLightMap
             catch (Exception e) { Log.Error(MapPrefs.FileName + " not read, the defaults are used: " + e.Message); }
             var values = MapPrefs.Parse(text, out var faults);
             foreach (string f in faults) Log.Error(MapPrefs.FileName + ": " + f);
+            _file = new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase);
 
             try
             {
@@ -285,8 +297,8 @@ namespace TimeLightMap
                 _group = null;
                 Log.Error("the map's settings page was not added (the config file and the console still work): " + e.GetType().Name + ": " + e.Message);
             }
-            _start = values;
-            TopCam.StartWith(values, from);
+            _startedFree = MapPrefs.Corner(values["corner"], out int c) && c == 0;
+            TopCam.StartWith(new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase), from);
         }
 
         /// <summary>A row changed on the page: its topcam command, run at the next frame.</summary>
@@ -297,8 +309,20 @@ namespace TimeLightMap
                 string key = MapSettings.KeyOf(setting.Key);
                 string text = key == null ? null : _settings.Text(key);
                 if (text == null) return;
-                if (text == "custom") text = _start != null && _start.TryGetValue(key, out string own) ? own : "off";
-                TopCam.Queue(MapPrefs.CommandsOf(key, text, _settings.Corner == "free"));
+                if (text == "custom") text = _file != null && _file.TryGetValue(key, out string own) ? own : "off";
+                bool free = _settings.Corner == "free";
+                var cmds = MapPrefs.CommandsOf(key, text, free);
+                if (key == "zoom" && _settings.AutoZoom) cmds.AddRange(MapPrefs.CommandsOf("autozoom", "on", free));
+                if (key == "corner" && !free)
+                {
+                    cmds.AddRange(MapPrefs.CommandsOf("size", _settings.Text("size"), false));
+                    if (_startedFree && _file != null && _file.TryGetValue("margin", out string margin))
+                    {
+                        cmds.AddRange(MapPrefs.CommandsOf("margin", margin, false));
+                        _startedFree = false;
+                    }
+                }
+                TopCam.Queue(cmds);
             }
             catch (Exception e) { Log.Error("setting " + setting.Key + ": " + e.Message); }
         }
@@ -321,7 +345,7 @@ namespace TimeLightMap
                     if (values.TryGetValue(key, out string text))
                     {
                         _settings.Set(key, text);
-                        if (_settings.Text(key) == "custom" && _start != null) _start[key] = text;      // a key the page cannot show
+                        if (_settings.Text(key) == "custom" && _file != null) _file[key] = text;      // a key the page cannot show
                     }
                 int kept = Keep(TopCam.Host);
                 return (true, "saved: the game keeps " + kept + " of the map's options that differ from " + MapPrefs.FileName
@@ -354,12 +378,13 @@ namespace TimeLightMap
         {
             if (string.IsNullOrEmpty(_folder) || !Directory.Exists(_folder)) return (false, "topcam save file: the mod's folder is not known");
             string path = Path.Combine(_folder, MapPrefs.FileName);
-            if (File.Exists(path)) File.Copy(path, path + ".bak", true);
+            bool backedUp = File.Exists(path);
+            if (backedUp) File.Copy(path, path + ".bak", true);
             string header = "# TimeLight Map options, written by 'topcam save file' (" + DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + ").\n"
                             + "# Read once when the game starts. What you change on the game's Settings > Mods page wins over this file.\n"
                             + "# The same words work in the game's console: topcam <key> <value>, e.g. topcam corner bottom-left\n";
             File.WriteAllText(path, MapPrefs.Render(values, header));
-            return (true, "saved into " + path + (File.Exists(path + ".bak") ? " (the old file kept as " + MapPrefs.FileName + ".bak)" : ""));
+            return (true, "saved into " + path + (backedUp ? " (the old file kept as " + MapPrefs.FileName + ".bak)" : ""));
         }
     }
 

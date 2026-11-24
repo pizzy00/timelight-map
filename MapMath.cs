@@ -38,7 +38,7 @@ namespace TimeLightMap
 
         public void Step(double target, double tau, double dt)
         {
-            if (!(dt > 0)) return;
+            if (!(dt > 0) || !double.IsFinite(dt) || !double.IsFinite(target)) return;
             if (!(tau > 1e-4))
             {
                 Value = target;
@@ -183,6 +183,25 @@ namespace TimeLightMap
             return true;
         }
 
+        /// <summary>The pack's weighted radius around (<paramref name="cx"/>, <paramref name="cz"/>): the largest distance of
+        /// any member weighted the same way as <see cref="Centroid"/> (1 within <paramref name="near"/> of the anchor, fading
+        /// smoothly to 0 at <paramref name="far"/>), so a lone wanderer smoothly lets go of auto-zoom without jerking it.</summary>
+        public static double Spread(double[] x, double[] z, int count, int anchor, double near, double far, double cx, double cz)
+        {
+            if (count <= 1 || anchor < 0 || anchor >= count) return 0;
+            double ax = x[anchor], az = z[anchor], maxR = 0;
+            for (int i = 0; i < count; i++)
+            {
+                double adx = x[i] - ax, adz = z[i] - az;
+                double w = i == anchor ? 1 : 1 - SmoothStep(near, far, Math.Sqrt(adx * adx + adz * adz));
+                if (w <= 0.05) continue;
+                double dx = x[i] - cx, dz = z[i] - cz;
+                double r = Math.Sqrt(dx * dx + dz * dz) * Math.Min(1.0, w * 2.0);
+                if (r > maxR) maxR = r;
+            }
+            return maxR;
+        }
+
         public static string Num(double v, string format = "0.#") =>
             double.IsFinite(v) ? v.ToString(format, CultureInfo.InvariantCulture) : "0";
 
@@ -284,17 +303,21 @@ namespace TimeLightMap
     internal sealed class ViewTarget
     {
         public TargetMode Mode;
-        public double FollowSpan = 3000;                        // the world width across the picture while following
+        public double FollowSpan = 3000;                        // the world width across the picture while following (max when AutoZoom is on)
         public double SpanFactor = 1;                           // the big map shows this many times FollowSpan (it glides there)
         public double Ease = 0.5;                               // seconds (see Spring)
+        public bool AutoZoom;                                   // smoothly zoom in closer when the followed group is huddled together
+        public double AutoMinSpan = 500;                        // world units across when tightly grouped (50 m)
 
         public const double MinSpan = 20, MaxSpan = 60000;
         public const double JumpUnits = 3000;                   // the followed point moved this far in one frame: a cut
+        public const double AutoSpreadScale = 3.2, AutoPad = 250;   // framing: 3.2x weighted radius + 25 m breathing room
 
         Spring _cx, _cz, _logSpan, _height;
         bool _started, _heightStarted;
         bool _havePoint;
         double _pointX, _pointZ;
+        double _autoSpan;
 
         public double Cx => _cx.Value;
         public double Cz => _cz.Value;
@@ -322,13 +345,15 @@ namespace TimeLightMap
         {
             Mode = TargetMode.None;
             _started = _heightStarted = _havePoint = false;
+            _autoSpan = 0;
             AtRest = true;
             WaitingForPoint = false;
         }
 
         /// <summary>One frame. <paramref name="dt"/>: real seconds since the last step. (<paramref name="pointX"/>,
-        /// <paramref name="pointZ"/>): the followed point when there is one (the squad's middle).</summary>
-        public void Step(double dt, bool havePoint, double pointX, double pointZ)
+        /// <paramref name="pointZ"/>): the followed point when there is one (the squad's middle). <paramref name="spread"/>:
+        /// the group's weighted radius in world units (negative when unknown).</summary>
+        public void Step(double dt, bool havePoint, double pointX, double pointZ, double spread = -1)
         {
             if (Mode == TargetMode.None) return;
             bool cold = !_started;      // nobody gave a start: begin at the aim itself (a cut, never a sweep from nowhere)
@@ -342,7 +367,22 @@ namespace TimeLightMap
             else if (cold) WaitingForPoint = true;
             // with nobody to follow the view holds where it is
             double aimX = _havePoint ? _pointX : _cx.Value, aimZ = _havePoint ? _pointZ : _cz.Value;
-            double aimSpan = Math.Clamp(FollowSpan * (SpanFactor > 0 ? SpanFactor : 1), MinSpan, MaxSpan);
+            double baseSpan = FollowSpan;
+            bool autoActive = AutoZoom && havePoint && spread >= 0 && double.IsFinite(spread) && !(SpanFactor > 1.01);
+            if (autoActive)
+            {
+                double hi = Math.Clamp(FollowSpan, MinSpan, MaxSpan);
+                double lo = Math.Clamp(Math.Min(AutoMinSpan, hi), MinSpan, hi);
+                double raw = Math.Clamp(spread * AutoSpreadScale + AutoPad, lo, hi);
+                if (cold || cut || !(_autoSpan > 0)) _autoSpan = raw;
+                else if (raw > _autoSpan * 1.15 || raw < _autoSpan / 1.18
+                         || (raw <= lo + 1e-6 && _autoSpan > lo * 1.05) || (raw >= hi - 1e-6 && _autoSpan < hi / 1.05))
+                    _autoSpan = raw;
+                else _autoSpan = Math.Clamp(_autoSpan, lo, hi);
+                baseSpan = _autoSpan;
+            }
+            else _autoSpan = 0;
+            double aimSpan = Math.Clamp(baseSpan * (SpanFactor > 0 ? SpanFactor : 1), MinSpan, MaxSpan);
             (AimCx, AimCz, AimSpan) = (aimX, aimZ, aimSpan);
             double logAim = Math.Log(aimSpan);
             if (cold || cut)
@@ -355,7 +395,7 @@ namespace TimeLightMap
             dt = Math.Clamp(dt, 0, 0.25);
             _cx.Step(aimX, Ease, dt);
             _cz.Step(aimZ, Ease, dt);
-            _logSpan.Step(logAim, Ease, dt);
+            _logSpan.Step(logAim, autoActive ? Math.Max(Ease, 0.9) : Ease, dt);
 
             // at rest: within a fiftieth of a pixel (of a 1000 pixel picture) and all but still
             double eps = Span * 2e-5;
@@ -405,15 +445,22 @@ namespace TimeLightMap
     /// </summary>
     internal sealed class LabelLayout
     {
-        public const int Max = 40;
+        public const int Max = 40, MaxObstacles = 8, SplitAt = 6;
         public const float Gap = 4f;          // dot edge to its name
         public const float Pad = 2f;          // least clear space between two names
         public const float Hyst = 6f;
-        public const float ColumnGap = 12f;   // a cluster's dots to its column
-        public const float RowGap = 3f;       // between two rows of a column
+        public const float ColumnGap = 14f;   // a cluster's dots to its column
+        public const float RowGap = 4f;       // between two rows of a column
         public const float Edge = 2f;         // names stay this far inside the picture
-        public const float LeadGap = 3f;      // a leader line stops this far from its name
+        public const float LeadGap = 5f;      // a leader line stops this far from its name (outside the dark pill)
         public const float Spare = 40f;       // room the right side must have before a left side returns to it
+
+        /// <summary>A round map: above 0, names prefer the side that fits inside this circle round the picture's middle (pixels).</summary>
+        public float CircleR;
+
+        // chrome obstacles (scale bar, north arrow) that squad names stay clear of
+        public int Obstacles;
+        public readonly float[] OX0 = new float[MaxObstacles], OY0 = new float[MaxObstacles], OX1 = new float[MaxObstacles], OY1 = new float[MaxObstacles];
 
         // in
         public int Count;
@@ -430,11 +477,21 @@ namespace TimeLightMap
         Dictionary<long, long> _prevRoot = new Dictionary<long, long>(), _nextRoot = new Dictionary<long, long>();
         Dictionary<long, bool> _prevInlineLeft = new Dictionary<long, bool>(), _nextInlineLeft = new Dictionary<long, bool>();
         Dictionary<long, bool> _prevColumnLeft = new Dictionary<long, bool>(), _nextColumnLeft = new Dictionary<long, bool>();
-        readonly int[] _parent = new int[Max], _size = new int[Max];
+        readonly int[] _parent = new int[Max], _size = new int[Max], _members = new int[Max];
         readonly float[] _inX = new float[Max], _inY = new float[Max];
         readonly bool[] _inLeft = new bool[Max];
         readonly float[] _colX0 = new float[Max], _colY0 = new float[Max], _colX1 = new float[Max], _colY1 = new float[Max];
-        readonly bool[] _colLeft = new bool[Max];
+        readonly float[] _col2X0 = new float[Max], _col2Y0 = new float[Max], _col2X1 = new float[Max], _col2Y1 = new float[Max];
+        readonly bool[] _colLeft = new bool[Max], _hasCol2 = new bool[Max];
+
+        public void ClearObstacles() => Obstacles = 0;
+
+        public void AddObstacle(float x0, float y0, float x1, float y1)
+        {
+            if (Obstacles >= MaxObstacles || !(x1 > x0) || !(y1 > y0)) return;
+            (OX0[Obstacles], OY0[Obstacles], OX1[Obstacles], OY1[Obstacles]) = (x0, y0, x1, y1);
+            Obstacles++;
+        }
 
         public void Forget()
         {
@@ -472,6 +529,44 @@ namespace TimeLightMap
             return nx * nx + ny * ny < r * r;
         }
 
+        bool HitsObstacle(float x0, float y0, float x1, float y1)
+        {
+            float a0 = x0 - Pad, b0 = y0 - Pad, a1 = x1 + Pad, b1 = y1 + Pad;
+            for (int o = 0; o < Obstacles; o++)
+                if (Overlap(a0, b0, a1, b1, OX0[o], OY0[o], OX1[o], OY1[o])) return true;
+            return false;
+        }
+
+        bool InBounds(float x0, float y0, float x1, float y1, float rectW, float rectH) =>
+            x0 >= Edge && y0 >= Edge && x1 <= rectW - Edge && y1 <= rectH - Edge
+            && (CircleR <= 0f || MapShape.BoxInCircle(x0, y0, x1, y1, rectW * 0.5f, rectH * 0.5f, CircleR - Edge))
+            && !HitsObstacle(x0, y0, x1, y1);
+
+        float NudgeY(float x, float y, float w, float h, float rectH)
+        {
+            float lo = Edge, hi = MathF.Max(Edge, rectH - Edge - h);
+            y = Math.Clamp(y, lo, hi);
+            for (int o = 0; o < Obstacles; o++)
+            {
+                if (x + w + Pad <= OX0[o] || x - Pad >= OX1[o]) continue;
+                if (y + h + Pad <= OY0[o] || y - Pad >= OY1[o]) continue;
+                float up = OY0[o] - Pad - h, down = OY1[o] + Pad;
+                bool upOk = up >= lo, downOk = down <= hi;
+                if (upOk && (!downOk || MathF.Abs(up - y) <= MathF.Abs(down - y))) y = up;
+                else if (downOk) y = down;
+            }
+            return Math.Clamp(y, lo, hi);
+        }
+
+        bool ColumnHits(int r, int j, float pad)
+        {
+            if (HitBox(_colX0[r] - pad, _colY0[r] - pad, _colX1[r] + pad, _colY1[r] + pad, j)) return true;
+            return _hasCol2[r] && HitBox(_col2X0[r] - pad, _col2Y0[r] - pad, _col2X1[r] + pad, _col2Y1[r] + pad, j);
+        }
+
+        bool HitBox(float x0, float y0, float x1, float y1, int j) =>
+            Overlap(x0, y0, x1, y1, X[j], Y[j], X[j] + W[j], Y[j] + H[j]) || BoxDot(x0, y0, x1, y1, DotX[j], DotY[j], DotR[j] + 1f);
+
         public void Solve(float rectW, float rectH)
         {
             int n = Count = Math.Clamp(Count, 0, Max);
@@ -479,13 +574,19 @@ namespace TimeLightMap
             // A. every name beside its own dot
             for (int i = 0; i < n; i++)
             {
+                float inY = Math.Clamp(DotY[i] - H[i] * 0.5f, Edge, Math.Max(Edge, rectH - Edge - H[i]));
                 float right = DotX[i] + DotR[i] + Gap, left = DotX[i] - DotR[i] - Gap - W[i];
-                bool fitsRight = right + W[i] <= rectW - Edge, fitsLeft = left >= Edge;
+                bool fitsRight = InBounds(right, inY, right + W[i], inY + H[i], rectW, rectH);
+                bool fitsLeft = InBounds(left, inY, left + W[i], inY + H[i], rectW, rectH);
+                bool rightSpare = fitsRight && right + W[i] <= rectW - Edge - Spare
+                    && (CircleR <= 0f || MapShape.BoxInCircle(right + Spare, inY, right + W[i] + Spare, inY + H[i], rectW * 0.5f, rectH * 0.5f, CircleR - Edge));
                 bool wasLeft = _prevInlineLeft.TryGetValue(Key[i], out bool l) && l;
-                bool useLeft = wasLeft ? fitsLeft && !(right + W[i] <= rectW - Edge - Spare) : !fitsRight && fitsLeft;
+                bool useLeft;
+                if (!fitsRight && !fitsLeft && CircleR > 0f) useLeft = DotX[i] > rectW * 0.5f;
+                else useLeft = wasLeft ? fitsLeft && !rightSpare : !fitsRight && fitsLeft;
                 _inLeft[i] = useLeft;
                 _inX[i] = Math.Clamp(useLeft ? left : right, Edge, Math.Max(Edge, rectW - Edge - W[i]));
-                _inY[i] = Math.Clamp(DotY[i] - H[i] * 0.5f, Edge, Math.Max(Edge, rectH - Edge - H[i]));
+                _inY[i] = inY;
                 _parent[i] = i;
             }
 
@@ -513,8 +614,7 @@ namespace TimeLightMap
                     {
                         if (Find(j) == r) continue;
                         float pad = Pad + (Together(r, j) ? Hyst : 0f);
-                        float x0 = _colX0[r] - pad, y0 = _colY0[r] - pad, x1 = _colX1[r] + pad, y1 = _colY1[r] + pad;
-                        if (Overlap(x0, y0, x1, y1, X[j], Y[j], X[j] + W[j], Y[j] + H[j]) || BoxDot(x0, y0, x1, y1, DotX[j], DotY[j], DotR[j] + 1f))
+                        if (ColumnHits(r, j, pad))
                         {
                             Union(r, j);
                             merged = true;
@@ -552,7 +652,7 @@ namespace TimeLightMap
 
         void Place(int n, float rectW, float rectH)
         {
-            for (int i = 0; i < n; i++) _size[i] = 0;
+            for (int i = 0; i < n; i++) (_size[i], _hasCol2[i]) = (0, false);
             for (int i = 0; i < n; i++) _size[Find(i)]++;
             for (int r = 0; r < n; r++)
             {
@@ -564,35 +664,109 @@ namespace TimeLightMap
                     continue;
                 }
                 float minX = float.MaxValue, maxX = float.MinValue, sumY = 0, cw = 0, ch = -RowGap;
+                int m = 0;
                 for (int i = r; i < n; i++)
                 {
                     if (Find(i) != r) continue;
+                    _members[m++] = i;
                     minX = MathF.Min(minX, DotX[i] - DotR[i]);
                     maxX = MathF.Max(maxX, DotX[i] + DotR[i]);
                     sumY += DotY[i];
                     cw = MathF.Max(cw, W[i]);
                     ch += H[i] + RowGap;
                 }
+                float avgY = sumY / m;
                 float rx = maxX + ColumnGap, lx = minX - ColumnGap - cw;
-                bool fitsRight = rx + cw <= rectW - Edge, fitsLeft = lx >= Edge;
+                float ry = NudgeY(rx, avgY - ch * 0.5f, cw, ch, rectH);
+                float ly = NudgeY(lx, avgY - ch * 0.5f, cw, ch, rectH);
+                bool fitsRight = InBounds(rx, ry, rx + cw, ry + ch, rectW, rectH);
+                bool fitsLeft = InBounds(lx, ly, lx + cw, ly + ch, rectW, rectH);
+
+                // large clusters (6+, or 4+ when one tall column won't fit): split into two balanced wings (right + left)
+                // in strict roster order so the stack stays compact in the middle of the map and clear of chrome / rims
+                if (m >= SplitAt || (m >= 4 && !fitsRight && !fitsLeft))
+                {
+                    int rightN = (m + 1) / 2;
+                    float rw1 = 0, rh1 = -RowGap, lw2 = 0, lh2 = -RowGap;
+                    for (int k = 0; k < rightN; k++)
+                    {
+                        int idx = _members[k];
+                        rw1 = MathF.Max(rw1, W[idx]);
+                        rh1 += H[idx] + RowGap;
+                    }
+                    for (int k = rightN; k < m; k++)
+                    {
+                        int idx = _members[k];
+                        lw2 = MathF.Max(lw2, W[idx]);
+                        lh2 += H[idx] + RowGap;
+                    }
+                    float rwx = maxX + ColumnGap, lwx = minX - ColumnGap - lw2;
+                    float rwy = NudgeY(rwx, avgY - rh1 * 0.5f, rw1, rh1, rectH);
+                    float lwy = NudgeY(lwx, avgY - lh2 * 0.5f, lw2, lh2, rectH);
+                    bool rightOk = InBounds(rwx, rwy, rwx + rw1, rwy + rh1, rectW, rectH);
+                    bool leftOk = InBounds(lwx, lwy, lwx + lw2, lwy + lh2, rectW, rectH);
+                    bool preferSplit = rightOk && leftOk;
+                    if (!preferSplit && !fitsRight && !fitsLeft)
+                    {
+                        // neither single column nor both wings fit wholly: pick whichever keeps more names inside bounds
+                        int splitIn = CountIn(0, rightN, rwx, rwy, rw1, false, rectW, rectH)
+                                    + CountIn(rightN, m, lwx, lwy, lw2, true, rectW, rectH);
+                        bool singleLeft = minX - Edge > rectW - Edge - maxX;
+                        float sx = Math.Clamp(singleLeft ? lx : rx, Edge, Math.Max(Edge, rectW - Edge - cw));
+                        float sy = singleLeft ? ly : ry;
+                        int singleIn = CountIn(0, m, sx, sy, cw, singleLeft, rectW, rectH);
+                        preferSplit = splitIn > singleIn;
+                    }
+                    if (preferSplit)
+                    {
+                        float x1 = Math.Clamp(rwx, Edge, Math.Max(Edge, rectW - Edge - rw1));
+                        float x2 = Math.Clamp(lwx, Edge, Math.Max(Edge, rectW - Edge - lw2));
+                        (_colX0[r], _colY0[r], _colX1[r], _colY1[r], _colLeft[r]) = (x1, rwy, x1 + rw1, rwy + rh1, false);
+                        (_col2X0[r], _col2Y0[r], _col2X1[r], _col2Y1[r], _hasCol2[r]) = (x2, lwy, x2 + lw2, lwy + lh2, true);
+                        PlaceColumn(0, rightN, x1, rwy, rw1, false);
+                        PlaceColumn(rightN, m, x2, lwy, lw2, true);
+                        continue;
+                    }
+                }
+
+                bool rightSpare = fitsRight && rx + cw <= rectW - Edge - Spare
+                    && (CircleR <= 0f || MapShape.BoxInCircle(rx + Spare, ry, rx + cw + Spare, ry + ch, rectW * 0.5f, rectH * 0.5f, CircleR - Edge));
                 bool wasLeft = _prevColumnLeft.TryGetValue(Key[r], out bool l) && l;
                 bool left;
                 if (!fitsRight && !fitsLeft) left = minX - Edge > rectW - Edge - maxX;      // neither: the roomier side
-                else if (wasLeft) left = fitsLeft && !(rx + cw <= rectW - Edge - Spare);
+                else if (wasLeft) left = fitsLeft && !rightSpare;
                 else left = !fitsRight;
                 float x = Math.Clamp(left ? lx : rx, Edge, Math.Max(Edge, rectW - Edge - cw));
-                float y = Math.Clamp(sumY / _size[r] - ch * 0.5f, Edge, Math.Max(Edge, rectH - Edge - ch));
+                float y = left ? ly : ry;
                 (_colX0[r], _colY0[r], _colX1[r], _colY1[r], _colLeft[r]) = (x, y, x + cw, y + ch, left);
-                for (int i = r; i < n; i++)
-                {
-                    if (Find(i) != r) continue;
-                    X[i] = left ? x + cw - W[i] : x;
-                    Y[i] = y;
-                    LeadX[i] = left ? X[i] + W[i] + LeadGap : X[i] - LeadGap;
-                    LeadY[i] = y + H[i] * 0.5f;
-                    (Stacked[i], Left[i]) = (true, left);
-                    y += H[i] + RowGap;
-                }
+                PlaceColumn(0, m, x, y, cw, left);
+            }
+        }
+
+        int CountIn(int from, int to, float colX, float y, float cw, bool left, float rectW, float rectH)
+        {
+            int ok = 0;
+            for (int k = from; k < to; k++)
+            {
+                int i = _members[k];
+                float xi = left ? colX + cw - W[i] : colX;
+                if (InBounds(xi, y, xi + W[i], y + H[i], rectW, rectH)) ok++;
+                y += H[i] + RowGap;
+            }
+            return ok;
+        }
+
+        void PlaceColumn(int from, int to, float colX, float y, float cw, bool left)
+        {
+            for (int k = from; k < to; k++)
+            {
+                int i = _members[k];
+                X[i] = left ? colX + cw - W[i] : colX;
+                Y[i] = y;
+                LeadX[i] = left ? X[i] + W[i] + LeadGap : X[i] - LeadGap;
+                LeadY[i] = y + H[i] * 0.5f;
+                (Stacked[i], Left[i]) = (true, left);
+                y += H[i] + RowGap;
             }
         }
     }
@@ -893,7 +1067,7 @@ namespace TimeLightMap
     /// </summary>
     internal sealed class PlaceLayout
     {
-        public const int Max = 48, MaxObstacles = 160;
+        public const int Max = 48, MaxObstacles = 160, MaxLineObstacles = 48;
         public const float Pad = 3f;            // clear space round a text
         public const float Edge = 2f;           // texts stay this far inside the picture
         public const float Step = 16f;          // the rings' spacing, pixels
@@ -903,9 +1077,10 @@ namespace TimeLightMap
         /// <summary>A round map: above 0, every text stays inside this circle round the picture's middle (pixels).</summary>
         public float CircleR;
 
-        // obstacles (x0, y0, x1, y1), set each frame
-        public int Obstacles;
+        // obstacles (x0, y0, x1, y1) and line obstacles (leader lines), set each frame
+        public int Obstacles, LineObstacles;
         public readonly float[] OX0 = new float[MaxObstacles], OY0 = new float[MaxObstacles], OX1 = new float[MaxObstacles], OY1 = new float[MaxObstacles];
+        public readonly float[] LX0 = new float[MaxLineObstacles], LY0 = new float[MaxLineObstacles], LX1 = new float[MaxLineObstacles], LY1 = new float[MaxLineObstacles];
 
         // in
         public int Count;
@@ -930,13 +1105,40 @@ namespace TimeLightMap
         public PlaceLayout() =>
             _byPriority = Comparer<int>.Create((a, b) => Priority[a] != Priority[b] ? Priority[b].CompareTo(Priority[a]) : a.CompareTo(b));
 
-        public void ClearObstacles() => Obstacles = 0;
+        public void ClearObstacles() => Obstacles = LineObstacles = 0;
 
         public void AddObstacle(float x0, float y0, float x1, float y1)
         {
             if (Obstacles >= MaxObstacles || !(x1 > x0) || !(y1 > y0)) return;
             (OX0[Obstacles], OY0[Obstacles], OX1[Obstacles], OY1[Obstacles]) = (x0, y0, x1, y1);
             Obstacles++;
+        }
+
+        public void AddLineObstacle(float x0, float y0, float x1, float y1)
+        {
+            if (LineObstacles >= MaxLineObstacles || !float.IsFinite(x0) || !float.IsFinite(y0) || !float.IsFinite(x1) || !float.IsFinite(y1)) return;
+            (LX0[LineObstacles], LY0[LineObstacles], LX1[LineObstacles], LY1[LineObstacles]) = (x0, y0, x1, y1);
+            LineObstacles++;
+        }
+
+        static bool SegHitsBox(float x0, float y0, float x1, float y1, float bx0, float by0, float bx1, float by1)
+        {
+            float dx = x1 - x0, dy = y1 - y0;
+            float t0 = 0f, t1 = 1f;
+            if (!Clip(-dx, x0 - bx0, ref t0, ref t1)) return false;
+            if (!Clip(dx, bx1 - x0, ref t0, ref t1)) return false;
+            if (!Clip(-dy, y0 - by0, ref t0, ref t1)) return false;
+            if (!Clip(dy, by1 - y0, ref t0, ref t1)) return false;
+            return t0 <= t1;
+
+            static bool Clip(float p, float q, ref float t0, ref float t1)
+            {
+                if (p == 0f) return q >= 0f;
+                float r = q / p;
+                if (p < 0f) { if (r > t1) return false; if (r > t0) t0 = r; }
+                else { if (r < t0) return false; if (r < t1) t1 = r; }
+                return true;
+            }
         }
 
         public const int Spots = 4 + 8 * Rings;
@@ -965,6 +1167,8 @@ namespace TimeLightMap
             float a0 = x0 - Pad, b0 = y0 - Pad, a1 = x1 + Pad, b1 = y1 + Pad;
             for (int o = 0; o < Obstacles; o++)
                 if (a0 < OX1[o] && OX0[o] < a1 && b0 < OY1[o] && OY0[o] < b1) return false;
+            for (int l = 0; l < LineObstacles; l++)
+                if (SegHitsBox(LX0[l], LY0[l], LX1[l], LY1[l], a0 - 1f, b0 - 1f, a1 + 1f, b1 + 1f)) return false;
             for (int j = 0; j < placed; j++)
                 if (a0 < _px1[j] && _px0[j] < a1 && b0 < _py1[j] && _py0[j] < b1) return false;
             return true;
@@ -1057,7 +1261,8 @@ namespace TimeLightMap
         /// picture at any turn (the picture's half diagonal on the ground is at most 0.71 of that).</summary>
         public static bool Near(in MapView v, double x, double z)
         {
-            double reach = Math.Max(v.Span, v.SpanZ / Math.Max(v.SinPitch, 0.05));
+            double sinP = Math.Max(v.SinPitch, 0.05);
+            double reach = Math.Max(v.Span, (v.SpanZ + 1500.0 * Math.Abs(v.CosPitch)) / sinP);
             return Math.Abs(x - v.Cx) <= reach && Math.Abs(z - v.Cz) <= reach;
         }
     }
