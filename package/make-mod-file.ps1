@@ -11,7 +11,7 @@ function Put([string]$s) { $b = [System.Text.Encoding]::UTF8.GetBytes($s); $bw.W
 $bw.Write([int]16)
 $bw.Write([int]2)
 Put "Kenshi Live Show"
-Put "TimeLight Map 1.4.0: a live 3D map in a corner of the game window. Code mod for MeitouClient 0.22.x, no game data. Options: Settings > Mods, or the console command topcam. GPL-3.0-or-later."
+Put "TimeLight Map 1.5.0: a live 3D map in a corner of the game window. Code mod for MeitouClient 0.24.x, no game data. Options: Settings > Mods, or the console command topcam. GPL-3.0-or-later."
 Put ""
 Put ""
 $bw.Write([int]0)

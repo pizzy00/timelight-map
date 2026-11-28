@@ -8,7 +8,7 @@
 // warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License (the LICENSE file)
 // for more details.
 //
-// A code mod for MeitouClient 0.22.x. It draws a live 3D view of the world from above in a corner of the game window
+// A code mod for MeitouClient 0.24.x. It draws a live 3D view of the world from above in a corner of the game window
 // (TopCam.cs), with marks on it (Marks.cs): your people's dots and names, where the selected ones walk, who is badly hurt,
 // hostile characters, discovered towns and places, the main camera's view cone, a scale bar and a north arrow. Options:
 // the game's Settings > Mods page, an optional config file (timelight-map.cfg in the mod's folder), the console command

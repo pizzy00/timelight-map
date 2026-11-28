@@ -8,7 +8,7 @@ static class PrefsChecks
 {
     static string Flat(System.Collections.Generic.List<string[]> list) => string.Join("|", list.Select(l => string.Join(" ", l)));
 
-    const string Marks = "marks on|layer names on|layer foes on|layer towns on|layer cone on|layer arrows on|layer route on|layer hurt on|layer scale on|layer north on";
+    const string Marks = "marks on|layer names on|layer foes on|layer traders on|layer towns on|layer cone on|layer arrows on|layer route on|layer hurt on|layer scale on|layer north on";
     const string Keys = "keys on|bind toggle N|bind big Shift+N|bind zoomin Equal|bind zoomout Minus";
     const string DefaultRun = "corner top-right|size medium|margin 24|shape square|frame off|follow squad|zoom 150|minzoom 50|autozoom on|pitch 90 --over 0|yaw 0 --over 0|alpha 1|quality high|"
                               + Marks + "|textscale 1|hidewithui on|" + Keys + "|on";

@@ -2,6 +2,36 @@
 
 All notable changes to TimeLight Map. The player's manual is [README.txt](README.txt).
 
+## 1.5.0 (2026-11-28)
+
+Built against MeitouClient 0.24.0; accepts 0.24.x (verified against 0.24.0 and 0.24.1).
+
+### New
+
+- **Moving traders (`traders` layer).** Roaming trade caravans (Hive caravans, Traders Guild caravans, nomad animal
+  traders, and modded faction caravans) now appear on the map as bright emerald-green ringed diamonds with their names
+  in matching green pills and a heading arrow while walking. Stationary town shopkeepers (town-owned squads, building
+  shops, and assigned homes) and hostile faction caravans are excluded so towns stay clean and enemies never show as
+  friendly traders. Distant roaming trade caravans also appear when zoomed out. Toggle on **Settings > Mods >
+  TimeLight Map** (`Moving traders`), in `timelight-map.cfg` (`traders = on | off`, aliases `caravans`, `merchants`),
+  or in the console (`topcam traders on | off`, `topcam layer traders on | off`).
+- **Custom waypoint routes (`topcam waypoints`).** Draw a multi-point dotted route with waypoint dots, destination ring,
+  and optional escaped label via `topcam waypoints <x> <z> [<x> <z> ...] [--name <text>]` (clear with `topcam waypoints
+  clear`), controlled by the `route` layer, with off-screen segment culling so long routes stay within the shape budget.
+
+### Improved
+
+- **Circular-chord wing tucking on round maps.** For large squads (10 to 16+ members) on a round map, top and bottom
+  wing rows gently tuck inward along the circle's chord so wide names near the curved rim stay inside the map without
+  getting clipped or overlapping squad dots.
+- **Round-map GPU shader early-out.** The marks fragment shader now discards pixels outside the circle before running
+  the shape loop, skipping ~21.5% of fragment work on round maps (including the big round map).
+- **Active-fighter hostile priority.** Hostiles actively fighting your squad are now placed before distant ambient
+  hostiles (and hostile cap raised from 40 to 48) with non-finite coordinate guards, so enemies in your fight are never
+  crowded out by distant bandits.
+- **Complete `topcam reset` & summary range.** `topcam reset` now clears transient layer errors and heading trackers;
+  auto-zoom status summary clamps its displayed range when `minzoom` exceeds `zoom`.
+
 ## 1.4.0 (2026-11-24)
 
 Built against MeitouClient 0.22.0; accepts 0.22.x (verified against 0.22.0 and 0.22.1).

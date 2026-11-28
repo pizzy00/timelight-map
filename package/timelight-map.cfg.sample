@@ -19,6 +19,7 @@ quality = high          # low | medium | high: how sharp and how often the pictu
 marks = on              # everything drawn on the picture (all the marks below)
 names = on              # your people's names
 hostiles = on           # red dots on characters hostile to you
+traders = on            # green markers on moving trade caravans
 places = on             # names of the towns and places you have discovered
 cone = on               # the dotted cone showing where the main camera looks
 arrows = on             # small arrows on your people while they walk

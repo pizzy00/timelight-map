@@ -125,10 +125,10 @@ static class V130Checks
         Check(same, "a written config file reads back as the same options (" + string.Join("; ", faults) + ")");
         Check(MapPrefs.Sample == MapPrefs.Render(MapPrefs.Defaults()), "the sample file is the defaults, written");
         // the other words of the file's keys
-        var list = MapPrefs.Commands("towns = off\nfoes = off\nroute = off\nwaypoints = off", out faults);
+        var list = MapPrefs.Commands("towns = off\nfoes = off\ncaravans = off\nroute = off\nwaypoints = off", out faults);
         string f = Flat(list);
-        Check(faults.Count == 0 && f.Contains("|layer towns off|") && f.Contains("|layer foes off|") && f.Contains("|layer route off|"),
-            "the keys' other words: towns, foes, route, waypoints: " + f);
+        Check(faults.Count == 0 && f.Contains("|layer towns off|") && f.Contains("|layer foes off|") && f.Contains("|layer traders off|") && f.Contains("|layer route off|"),
+            "the keys' other words: towns, foes, caravans, route, waypoints: " + f);
         Check(Flat(MapPrefs.CommandsOf("key_big", "Shift+N", false)) == "bind big Shift+N" && MapPrefs.CommandsOf("rect", "1 2 30 40", false).Count == 0
               && Flat(MapPrefs.CommandsOf("hostiles", "off", false)) == "layer foes off" && Flat(MapPrefs.CommandsOf("places", "on", false)) == "layer towns on",
             "single options as commands (the settings page's changes)");
@@ -306,6 +306,28 @@ static class V130Checks
         pl.Solve(dim, dim);
         Check(pl.Shown[0] && MapShape.BoxInCircle(pl.X[0], pl.Y[0], pl.X[0] + pl.W[0], pl.Y[0] + pl.H[0], dim * 0.5f, dim * 0.5f, rad - 1f),
             "Catun beside 11-person cluster: shown inside circle, clear of names, dots and leader lines");
+
+        // 16-person squad with wide names in a 374x374 round map: circular-chord tucking keeps all 16 inside the circle with 0 overlaps
+        const float bigDim = 374f, bigRad = 186.5f;
+        var bigSq = new LabelLayout { CircleR = bigRad, Count = 16 };
+        float[] bigW = { 104, 62, 54, 64, 58, 60, 56, 98, 108, 96, 52, 50, 58, 62, 66, 102 };
+        for (int i = 0; i < 16; i++)
+            (bigSq.Key[i], bigSq.DotX[i], bigSq.DotY[i], bigSq.DotR[i], bigSq.W[i], bigSq.H[i]) =
+                (100 + i, 185f + (i % 4) * 3f, 185f + (i / 4) * 2f, i == 0 ? 6f : 5f, bigW[i], 20f);
+        float bigScaleY0 = bigDim * 0.5f + bigRad * 0.80f - 20f;
+        bigSq.AddObstacle(bigDim * 0.15f, bigScaleY0, bigDim * 0.85f, bigDim);
+        bigSq.AddObstacle(265f, 12f, 313f, 64f);
+        bigSq.Solve(bigDim, bigDim);
+        bool all16In = true, no16Overlap = true;
+        for (int i = 0; i < 16; i++)
+        {
+            all16In &= MapShape.BoxInCircle(bigSq.X[i], bigSq.Y[i], bigSq.X[i] + bigSq.W[i], bigSq.Y[i] + bigSq.H[i], bigDim * 0.5f, bigDim * 0.5f, bigRad - 1f);
+            for (int j = i + 1; j < 16; j++)
+                if (bigSq.X[i] < bigSq.X[j] + bigSq.W[j] && bigSq.X[j] < bigSq.X[i] + bigSq.W[i]
+                    && bigSq.Y[i] < bigSq.Y[j] + bigSq.H[j] && bigSq.Y[j] < bigSq.Y[i] + bigSq.H[i]) no16Overlap = false;
+        }
+        Check(bigSq.Clusters == 1 && all16In && no16Overlap,
+            "16-person round map with wide rim names: circular-chord tucking keeps all 16 inside circle, zero overlaps");
     }
 
     static void BigFollow()
@@ -343,5 +365,11 @@ static class V130Checks
         az.SpanFactor = 1;
         for (int i = 0; i < 600; i++) az.Step(1 / 60.0, true, 100, 200, 18);
         Check(Math.Abs(az.Span - 500) < 2, "closing big map glides back into tight 50 m group (" + az.Span.ToString("0") + ")");
+        // AutoMinSpan > FollowSpan clamps cleanly to FollowSpan; NaN spread holds steady
+        var inv = new ViewTarget { Mode = TargetMode.Follow, FollowSpan = 800, AutoZoom = true, AutoMinSpan = 2000, Ease = 0.5 };
+        inv.Step(1 / 60.0, true, 0, 0, 10);
+        Check(Math.Abs(inv.Span - 800) < 1 && Math.Abs(inv.AimSpan - 800) < 1, "auto-zoom clamps AutoMinSpan > FollowSpan to FollowSpan");
+        inv.Step(1 / 60.0, true, 0, 0, double.NaN);
+        Check(double.IsFinite(inv.Span) && Math.Abs(inv.AimSpan - 800) < 1, "auto-zoom handles NaN spread safely");
     }
 }

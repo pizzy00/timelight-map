@@ -323,6 +323,7 @@ namespace TimeLightMap
             new Opt("marks", "on", "everything drawn on the picture (all the marks below)"),
             new Opt("names", "on", "your people's names"),
             new Opt("hostiles", "on", "red dots on characters hostile to you"),
+            new Opt("traders", "on", "green markers on moving trade caravans"),
             new Opt("places", "on", "names of the towns and places you have discovered"),
             new Opt("cone", "on", "the dotted cone showing where the main camera looks"),
             new Opt("arrows", "on", "small arrows on your people while they walk"),
@@ -355,6 +356,11 @@ namespace TimeLightMap
         {
             "towns" => "places",
             "foes" => "hostiles",
+            "trader" => "traders",
+            "caravans" => "traders",
+            "caravan" => "traders",
+            "merchants" => "traders",
+            "merchant" => "traders",
             "route" => "routes",
             "waypoints" => "routes",
             string k => k,
@@ -431,7 +437,7 @@ namespace TimeLightMap
                     if (!freeCorner) list.Add(new[] { key, v });
                     break;
                 case "pitch": case "yaw": list.Add(new[] { key, v, "--over", "0" }); break;      // at once, not a glide
-                case "names": case "cone": case "arrows": case "hurt": case "scale": case "north":
+                case "names": case "cone": case "arrows": case "hurt": case "scale": case "north": case "traders":
                     list.Add(new[] { "layer", key, v }); break;
                 case "hostiles": list.Add(new[] { "layer", "foes", v }); break;
                 case "places": list.Add(new[] { "layer", "towns", v }); break;

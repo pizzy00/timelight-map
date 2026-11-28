@@ -80,6 +80,9 @@ namespace TimeLightMap
         [Setting("Hostiles", Hint = "Red dots on characters hostile to you")]
         public bool Hostiles { get; set; } = true;
 
+        [Setting("Moving traders", Hint = "Green markers and names on roaming trade caravans")]
+        public bool Traders { get; set; } = true;
+
         [Setting("Places", Hint = "Names of the towns and places you have discovered")]
         public bool Places { get; set; } = true;
 
@@ -127,7 +130,7 @@ namespace TimeLightMap
         {
             ("Map", "map"), ("Corner", "corner"), ("Size", "size"), ("Shape", "shape"), ("Frame", "frame"), ("Follow", "follow"),
             ("Zoom", "zoom"), ("AutoZoom", "autozoom"), ("MinZoom", "minzoom"), ("Pitch", "pitch"), ("Alpha", "alpha"), ("Quality", "quality"), ("Marks", "marks"), ("Names", "names"),
-            ("Hostiles", "hostiles"), ("Places", "places"), ("Cone", "cone"), ("Arrows", "arrows"), ("Routes", "routes"), ("Hurt", "hurt"),
+            ("Hostiles", "hostiles"), ("Traders", "traders"), ("Places", "places"), ("Cone", "cone"), ("Arrows", "arrows"), ("Routes", "routes"), ("Hurt", "hurt"),
             ("ScaleBar", "scale"), ("North", "north"), ("TextScale", "textscale"), ("HideWithUi", "hidewithui"), ("Keys", "keys"),
             ("KeyToggle", "key_toggle"), ("KeyBig", "key_big"), ("KeyZoomIn", "key_zoomin"), ("KeyZoomOut", "key_zoomout"),
         };
@@ -180,6 +183,7 @@ namespace TimeLightMap
                 case "marks": Marks = Switch(text, true); break;
                 case "names": Names = Switch(text, true); break;
                 case "hostiles": Hostiles = Switch(text, true); break;
+                case "traders": Traders = Switch(text, true); break;
                 case "places": Places = Switch(text, true); break;
                 case "cone": Cone = Switch(text, true); break;
                 case "arrows": Arrows = Switch(text, true); break;
@@ -215,6 +219,7 @@ namespace TimeLightMap
             "marks" => MapPrefs.OnOffWord(Marks),
             "names" => MapPrefs.OnOffWord(Names),
             "hostiles" => MapPrefs.OnOffWord(Hostiles),
+            "traders" => MapPrefs.OnOffWord(Traders),
             "places" => MapPrefs.OnOffWord(Places),
             "cone" => MapPrefs.OnOffWord(Cone),
             "arrows" => MapPrefs.OnOffWord(Arrows),

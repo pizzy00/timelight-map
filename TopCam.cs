@@ -55,7 +55,7 @@ namespace TimeLightMap
     /// </summary>
     internal static class TopCam
     {
-        public const string Version = "1.4.0";
+        public const string Version = "1.5.0";
 
         // ---- settings (set by commands, read by the render hook; both on the main thread) ----
         // The values here are the state before the options run (MapPrefs.Commands, at the first drawn frame): off, top right.
@@ -733,12 +733,21 @@ namespace TimeLightMap
             uniform vec4 uLook;           // x: 1 round, y: 1 a frame
             void main()
             {
+                vec2 size = uMarkRect.xy;
+                vec2 p = vec2(vUv.x, 1.0 - vUv.y) * size;
+                float edge;
+                if (uLook.x > 0.5)
+                {
+                    edge = min(size.x, size.y) * 0.5 - 0.5 - length(p - size * 0.5);
+                    if (edge < -0.5) discard;
+                }
+                else edge = min(min(p.x, p.y), min(size.x - p.x, size.y - p.y));
+
                 vec2 uv = vec2(uFlip.x > 0.5 ? 1.0 - vUv.x : vUv.x, uFlip.y > 0.5 ? 1.0 - vUv.y : vUv.y);
                 float exposure = uExposure;
                 if (uAuto != 0) exposure *= max(0.55 / max(texture(uAdapted, vec2(0.5)).r, 1e-6), 0.001);
                 vec3 c = clamp(max(texture(uTop, uv).rgb, 0.0) * exposure, 0.0, 1.0);
 
-                vec2 p = vec2(vUv.x, 1.0 - vUv.y) * uMarkRect.xy;
                 int count = int(uMarkRect.z + 0.5);
                 for (int i = 0; i < count; i++)
                 {
@@ -838,14 +847,7 @@ namespace TimeLightMap
                     c = mix(c, pal.rgb, fill * pal.a);
                 }
                 float alpha = uMarkRect.w;
-                vec2 size = uMarkRect.xy;
-                float edge;
-                if (uLook.x > 0.5)
-                {
-                    edge = min(size.x, size.y) * 0.5 - 0.5 - length(p - size * 0.5);
-                    alpha *= smoothstep(-0.5, 0.5, edge);
-                }
-                else edge = min(min(p.x, p.y), min(size.x - p.x, size.y - p.y));
+                if (uLook.x > 0.5) alpha *= smoothstep(-0.5, 0.5, edge);
                 if (uLook.y > 0.5)
                 {
                     c = mix(c, vec3(0.86, 0.80, 0.66), 1.0 - smoothstep(2.6, 3.4, edge));
@@ -974,7 +976,7 @@ namespace TimeLightMap
 
         public static readonly string Usage =
             "usage: topcam [on|off|toggle | " + MapPrefs.Words + " | big [on|off] | shape square|round | frame on|off"
-            + " | quality low|medium|high | marks on|off | layer [<" + MapLayers.WordList + "|all> on|off ...] | hostiles on|off | places on|off"
+            + " | quality low|medium|high | marks on|off | layer [<" + MapLayers.WordList + "|all> on|off ...] | hostiles on|off | traders on|off | places on|off | waypoints <x> <z> [...] [--name <text>] | waypoints clear"
             + " | cone [on|off] [reach <0.5..8>] [fill <0..1>] | pitch <35..90> [--over <s>] | yaw <deg> [--over <s>] | alpha <0..1> [--over <s>]"
             + " | textscale <0.5..3> | hidewithui on|off | keys on|off | bind <" + string.Join("|", MapPrefs.KeyActions) + "> <key>|off"
             + " | save [file] | reset | view <cx> <cz> <span> | view follow [span] | rect <x> <y> <w> <h> | ease <s> | fps <n> | movefps <n>"
@@ -1302,6 +1304,7 @@ namespace TimeLightMap
             v["marks"] = MapPrefs.OnOffWord(Marks.On);
             v["names"] = L(MapLayers.Names);
             v["hostiles"] = L(MapLayers.Foes);
+            v["traders"] = L(MapLayers.Traders);
             v["places"] = L(MapLayers.Towns);
             v["cone"] = L(MapLayers.Cone);
             v["arrows"] = L(MapLayers.Arrows);
@@ -1334,7 +1337,7 @@ namespace TimeLightMap
             if (Round) sb.Append(", round");
             if (FrameOn) sb.Append(", framed");
             if (Target.AutoZoom && Target.Mode == TargetMode.Follow)
-                sb.Append(", auto-zoom ").Append(MapMath.Num(Target.AutoMinSpan / MapMath.UnitsPerMetre)).Append("..").Append(MapMath.Num(ZoomMetres)).Append(" m");
+                sb.Append(", auto-zoom ").Append(MapMath.Num(Math.Min(Target.AutoMinSpan, Target.FollowSpan) / MapMath.UnitsPerMetre)).Append("..").Append(MapMath.Num(ZoomMetres)).Append(" m");
             else
                 sb.Append(", ").Append(MapMath.Num(ZoomMetres)).Append(" m across");
             if (BigOn) sb.Append(" (x").Append(MapPrefs.BigZoom.ToString(ci)).Append(" while big)");

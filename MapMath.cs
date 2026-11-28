@@ -709,12 +709,12 @@ namespace TimeLightMap
                     if (!preferSplit && !fitsRight && !fitsLeft)
                     {
                         // neither single column nor both wings fit wholly: pick whichever keeps more names inside bounds
-                        int splitIn = CountIn(0, rightN, rwx, rwy, rw1, false, rectW, rectH)
-                                    + CountIn(rightN, m, lwx, lwy, lw2, true, rectW, rectH);
+                        int splitIn = CountIn(0, rightN, rwx, rwy, rw1, false, rectW, rectH, minX, maxX)
+                                    + CountIn(rightN, m, lwx, lwy, lw2, true, rectW, rectH, minX, maxX);
                         bool singleLeft = minX - Edge > rectW - Edge - maxX;
                         float sx = Math.Clamp(singleLeft ? lx : rx, Edge, Math.Max(Edge, rectW - Edge - cw));
                         float sy = singleLeft ? ly : ry;
-                        int singleIn = CountIn(0, m, sx, sy, cw, singleLeft, rectW, rectH);
+                        int singleIn = CountIn(0, m, sx, sy, cw, singleLeft, rectW, rectH, minX, maxX);
                         preferSplit = splitIn > singleIn;
                     }
                     if (preferSplit)
@@ -723,8 +723,8 @@ namespace TimeLightMap
                         float x2 = Math.Clamp(lwx, Edge, Math.Max(Edge, rectW - Edge - lw2));
                         (_colX0[r], _colY0[r], _colX1[r], _colY1[r], _colLeft[r]) = (x1, rwy, x1 + rw1, rwy + rh1, false);
                         (_col2X0[r], _col2Y0[r], _col2X1[r], _col2Y1[r], _hasCol2[r]) = (x2, lwy, x2 + lw2, lwy + lh2, true);
-                        PlaceColumn(0, rightN, x1, rwy, rw1, false);
-                        PlaceColumn(rightN, m, x2, lwy, lw2, true);
+                        PlaceColumn(0, rightN, x1, rwy, rw1, false, rectW, rectH, minX, maxX, ref _colX0[r], ref _colX1[r]);
+                        PlaceColumn(rightN, m, x2, lwy, lw2, true, rectW, rectH, minX, maxX, ref _col2X0[r], ref _col2X1[r]);
                         continue;
                     }
                 }
@@ -739,31 +739,62 @@ namespace TimeLightMap
                 float x = Math.Clamp(left ? lx : rx, Edge, Math.Max(Edge, rectW - Edge - cw));
                 float y = left ? ly : ry;
                 (_colX0[r], _colY0[r], _colX1[r], _colY1[r], _colLeft[r]) = (x, y, x + cw, y + ch, left);
-                PlaceColumn(0, m, x, y, cw, left);
+                PlaceColumn(0, m, x, y, cw, left, rectW, rectH, minX, maxX, ref _colX0[r], ref _colX1[r]);
             }
         }
 
-        int CountIn(int from, int to, float colX, float y, float cw, bool left, float rectW, float rectH)
+        /// <summary>On a round map, gently tucks a top/bottom wing row inward along the circle's chord so long names near the
+        /// curved rim stay inside the circle without overlapping the cluster dots or chrome obstacles.</summary>
+        float TuckInCircle(float xi, float y, float w, float h, bool left, float rectW, float rectH, float dotMinX, float dotMaxX)
+        {
+            if (CircleR <= 0f) return xi;
+            float cx = rectW * 0.5f, cy = rectH * 0.5f, rad = CircleR - Edge;
+            if (MapShape.BoxInCircle(xi, y, xi + w, y + h, cx, cy, rad)) return xi;
+            float dy = MathF.Max(MathF.Abs(y - cy), MathF.Abs(y + h - cy));
+            if (dy >= rad) return xi;
+            float halfChord = MathF.Sqrt(rad * rad - dy * dy);
+            float tucked = xi;
+            if (!left)
+            {
+                float maxX = cx + halfChord - w;
+                float floorX = MathF.Min(xi, dotMaxX + Gap);
+                if (maxX < xi) tucked = MathF.Max(floorX, maxX);
+            }
+            else
+            {
+                float minX = cx - halfChord;
+                float ceilX = MathF.Max(xi, dotMinX - Gap - w);
+                if (minX > xi) tucked = MathF.Min(ceilX, minX);
+            }
+            tucked = Math.Clamp(tucked, Edge, Math.Max(Edge, rectW - Edge - w));
+            return !HitsObstacle(tucked, y, tucked + w, y + h) ? tucked : xi;
+        }
+
+        int CountIn(int from, int to, float colX, float y, float cw, bool left, float rectW, float rectH, float dotMinX, float dotMaxX)
         {
             int ok = 0;
             for (int k = from; k < to; k++)
             {
                 int i = _members[k];
-                float xi = left ? colX + cw - W[i] : colX;
+                float xi = TuckInCircle(left ? colX + cw - W[i] : colX, y, W[i], H[i], left, rectW, rectH, dotMinX, dotMaxX);
                 if (InBounds(xi, y, xi + W[i], y + H[i], rectW, rectH)) ok++;
                 y += H[i] + RowGap;
             }
             return ok;
         }
 
-        void PlaceColumn(int from, int to, float colX, float y, float cw, bool left)
+        void PlaceColumn(int from, int to, float colX, float y, float cw, bool left, float rectW, float rectH, float dotMinX, float dotMaxX,
+            ref float boundX0, ref float boundX1)
         {
             for (int k = from; k < to; k++)
             {
                 int i = _members[k];
-                X[i] = left ? colX + cw - W[i] : colX;
+                float xi = TuckInCircle(left ? colX + cw - W[i] : colX, y, W[i], H[i], left, rectW, rectH, dotMinX, dotMaxX);
+                X[i] = xi;
                 Y[i] = y;
-                LeadX[i] = left ? X[i] + W[i] + LeadGap : X[i] - LeadGap;
+                boundX0 = MathF.Min(boundX0, xi);
+                boundX1 = MathF.Max(boundX1, xi + W[i]);
+                LeadX[i] = left ? xi + W[i] + LeadGap : xi - LeadGap;
                 LeadY[i] = y + H[i] * 0.5f;
                 (Stacked[i], Left[i]) = (true, left);
                 y += H[i] + RowGap;
@@ -965,20 +996,21 @@ namespace TimeLightMap
     /// <summary>The marks' layers, each switched on and off on its own (topcam layer &lt;name&gt; on|off). All on by default.
     /// names: your people's names; foes: the red dots of hostile characters; towns: the names of discovered towns and
     /// places; cone: the main camera's view cone; arrows: the heading arrows on walking people; scale: the scale bar;
-    /// north: the N arrow; route: where the selected people walk to; hurt: a ring on anyone badly hurt. The dots of your
-    /// people themselves have no switch. Other words: hostiles (foes), places (towns), routes / waypoints (route), health (hurt).</summary>
+    /// north: the N arrow; route: where the selected people walk to; hurt: a ring on anyone badly hurt; traders: green
+    /// markers on moving trade caravans. The dots of your people themselves have no switch. Other words: hostiles (foes),
+    /// places (towns), routes / waypoints (route), health (hurt), caravans / merchants (traders).</summary>
     internal static class MapLayers
     {
-        public const int Names = 0, Foes = 1, Towns = 2, Cone = 3, Arrows = 4, Scale = 5, North = 6, Route = 7, Hurt = 8, Count = 9;
+        public const int Names = 0, Foes = 1, Towns = 2, Cone = 3, Arrows = 4, Scale = 5, North = 6, Route = 7, Hurt = 8, Traders = 9, Count = 10;
         public const int All = (1 << Count) - 1;
-        public static readonly string[] Words = { "names", "foes", "towns", "cone", "arrows", "scale", "north", "route", "hurt" };
-        public const string WordList = "names|foes|towns|cone|arrows|scale|north|route|hurt";
+        public static readonly string[] Words = { "names", "foes", "towns", "cone", "arrows", "scale", "north", "route", "hurt", "traders" };
+        public const string WordList = "names|foes|towns|cone|arrows|scale|north|route|hurt|traders";
 
         public static bool On(int mask, int layer) => (mask & (1 << layer)) != 0;
 
         public static int Set(int mask, int layer, bool on) => on ? mask | (1 << layer) : mask & ~(1 << layer);
 
-        /// <summary>A layer's name (any case; the singular too: name, foe, town, arrow; and the other words). -1: none.</summary>
+        /// <summary>A layer's name (any case; the singular too: name, foe, town, arrow, trader; and the other words). -1: none.</summary>
         public static int Index(string word)
         {
             if (string.IsNullOrEmpty(word)) return -1;
@@ -988,6 +1020,7 @@ namespace TimeLightMap
                 case "places": case "place": return Towns;
                 case "routes": case "waypoints": case "waypoint": case "paths": case "path": return Route;
                 case "health": return Hurt;
+                case "caravans": case "caravan": case "merchants": case "merchant": return Traders;
             }
             for (int i = 0; i < Words.Length; i++)
             {
@@ -1055,6 +1088,27 @@ namespace TimeLightMap
             }
             return n;
         }
+
+        /// <summary>Readable map label for a moving trade caravan: keeps descriptive character names like
+        /// "Hive Caravan Boss", prefers the squad name (e.g. "Trade Caravan") over a bare personal name, or tags
+        /// a personal name with "(Trader)" so it is unmistakable on the map.</summary>
+        public static string TraderLabel(string charName, string squadName)
+        {
+            string cn = string.IsNullOrWhiteSpace(charName) ? null : charName.Trim();
+            string sn = string.IsNullOrWhiteSpace(squadName) ? null : squadName.Trim();
+            if (cn != null && HasTradeWord(cn)) return cn;
+            if (sn != null && HasTradeWord(sn)) return sn;
+            if (cn != null) return cn + " (Trader)";
+            return sn ?? "Trade Caravan";
+        }
+
+        static bool HasTradeWord(string s) =>
+            s.IndexOf("caravan", StringComparison.OrdinalIgnoreCase) >= 0
+            || s.IndexOf("trader", StringComparison.OrdinalIgnoreCase) >= 0
+            || s.IndexOf("trade ", StringComparison.OrdinalIgnoreCase) >= 0
+            || s.IndexOf("merchant", StringComparison.OrdinalIgnoreCase) >= 0
+            || s.IndexOf("nomad", StringComparison.OrdinalIgnoreCase) >= 0
+            || s.IndexOf("vendor", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     /// <summary>

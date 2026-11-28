@@ -142,20 +142,20 @@ namespace TimeLightMap
     /// </summary>
     internal static class Marks
     {
-        public const int MaxShapes = 256, MaxPeople = 48, MaxHostiles = 40, MaxText = 96, MaxRouteShapes = 72;
+        public const int MaxShapes = 256, MaxPeople = 48, MaxHostiles = 48, MaxTraders = 24, MaxText = 96, MaxRouteShapes = 72;
 
         // shape kinds (the shader's; it also knows 7, a plain filled triangle): 8 is a triangle that fades away from its first corner
         const float Disc = 0, Hollow = 1, Ring = 2, Diamond = 3, Line = 4, Dots = 5, Triangle = 6, TriFade = 8;
         // palette slots (the shader's palette has 32; the rest stay empty)
         const float PalSquad = 0, PalLeader = 1, PalHostile = 2, PalRing = 3, PalLead = 4, PalChrome = 5, PalPlace = 6,
             PalConeFill = 7, PalConeEdge = 8, PalConeArc = 9, PalBack = 10, PalOther = 11, PalRoute = 12, PalRouteFar = 13,
-            PalHurt = 14, PalHurtBad = 15;
+            PalHurt = 14, PalHurtBad = 15, PalTrader = 16;
         const float BackAlpha = 0.74f;          // the dark pill behind each text on the map (so it reads on bright ground)
         public const int PaletteSlots = 32;
         public const float ConeMinPx = 30f;     // the shortest view cone on the map, pixels
         public const float ArrowReach = 10f;    // a heading arrow's tip stands this far out from the edge of the dot
         // text styles
-        const byte StyleName = 0, StyleLeader = 1, StylePlace = 2, StyleChrome = 3;
+        const byte StyleName = 0, StyleLeader = 1, StylePlace = 2, StyleChrome = 3, StyleTrader = 4;
 
         public const string Font = "Kenshi_StandardFont_Medium";
 
@@ -163,6 +163,8 @@ namespace TimeLightMap
         public static bool On;
         public static string PlacesError;               // a failure there switches off only the towns layer
         public static int LastGamePlaces;
+        public static string TradersError;              // a failure there switches off only the traders layer
+        public static int LastTraders;
         public static string Error;
         public static float TextScale = 1f;
         public static int Layers = MapLayers.All;      // topcam layer <name> on|off
@@ -170,6 +172,20 @@ namespace TimeLightMap
         public static string ConeError, ArrowError, RouteError;     // a failure there switches off only that layer
 
         static readonly Dictionary<string, string> Captions = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // ---- 'topcam waypoints': a route handed in by command (world x z per point, the end last), drawn on the route layer
+        public const int MaxWaypoints = 400, MaxWaypointShapes = 120, MaxWaypointDots = 56;
+        sealed class WaypointSet
+        {
+            public double[] X, Z;
+            public string Name;
+            public long Stamp;
+        }
+        static volatile WaypointSet _waypoints;      // swapped whole by the command; the frame reads one reference
+        static long _waypointStamp;
+        static readonly float[] _wpX = new float[MaxWaypoints + 1], _wpY = new float[MaxWaypoints + 1];
+        public static int LastWaypointsDrawn, LastWaypointDots;
+        public static string WaypointError;
 
         // ---- what the shader draws (render hook only) ----
         public static readonly float[] Shapes = new float[MaxShapes * 8];
@@ -199,6 +215,7 @@ namespace TimeLightMap
                 0.50f, 0.86f, 1.00f, 0.45f,   // 13 a route's provisional, long-range part
                 1.00f, 0.58f, 0.12f, 1f,      // 14 hurt: orange ring
                 0.95f, 0.13f, 0.10f, 1f,      // 15 badly hurt: red ring
+                0.24f, 0.94f, 0.58f, 1f,      // 16 moving trader / trade caravan: emerald green
             };
             Array.Copy(used, p, used.Length);
             return p;
@@ -229,7 +246,7 @@ namespace TimeLightMap
         static bool _round;                 // this frame's map is round: texts stay inside its circle
         static float _rw, _rh, _radius;
 
-        /// <summary>The text styles at an alpha (hundredths): name, leader, place, scale and N.</summary>
+        /// <summary>The text styles at an alpha (hundredths): name, leader, place, scale and N, moving trader.</summary>
         static Dictionary<string, string>[] StylesAt(int alpha)
         {
             alpha = Math.Clamp(alpha, 0, 100);
@@ -239,14 +256,19 @@ namespace TimeLightMap
                 Style("1 0.85 0.40", "Center", alpha),
                 Style("1 0.93 0.68", "Center", alpha),
                 Style("1 1 1", "Center", alpha),
+                Style("0.45 1 0.72", "Center", alpha),
             };
         }
 
         static readonly LabelLayout Layout = new LabelLayout();
-        static readonly PlaceLayout PlaceSpots = new PlaceLayout();      // where the place labels' texts go (round your people)
+        static readonly PlaceLayout PlaceSpots = new PlaceLayout();      // where the place & trader labels' texts go (round your people)
         static readonly RoutePlan Route = new RoutePlan();
         static readonly string[] _placeText = new string[PlaceLayout.Max];
+        static readonly byte[] _placeStyle = new byte[PlaceLayout.Max];
         static readonly Dictionary<string, string> PlaceCaptions = new Dictionary<string, string>(StringComparer.Ordinal);
+        static readonly Heading TraderWalk = new Heading();
+        static readonly HashSet<int> _seenTraderSquads = new HashSet<int>();
+        static readonly HashSet<int> _hostileSquads = new HashSet<int>();
         public static int LastPlacesShown, LastPlacesDropped;
         static bool _sqNames, _sqArrows, _sqHurt;      // the people's layers of this frame (PeopleLayout -> PeopleDraw)
         static double _scaleMetres = -1;
@@ -317,7 +339,7 @@ namespace TimeLightMap
                 _alpha = (byte)Math.Clamp((int)MathF.Round(alpha * 100f), 0, 100);
                 (_round, _rw, _rh, _radius) = (round, rw, rh, MapShape.Radius(rw, rh));
                 _coneDrawn = false;
-                LastArrows = LastRoutes = LastRoutesSkipped = LastHurt = 0;
+                LastArrows = LastRoutes = LastRoutesSkipped = LastHurt = LastWaypointsDrawn = LastWaypointDots = 0;
                 if (v.Valid && rw >= 16 && rh >= 16 && v.Span > 0 && v.SpanZ > 0)
                 {
                     int lay = Layers;
@@ -327,9 +349,10 @@ namespace TimeLightMap
                     PeopleLayout(v, rw, rh, lay, gameSeconds);      // first, so the place labels can keep off the names and dots
                     if (MapLayers.On(lay, MapLayers.Cone)) ConeLayer(cam, v, rw, rh);
                     if (MapLayers.On(lay, MapLayers.Route)) RouteLayer(v, rw, rh);
+                    if (MapLayers.On(lay, MapLayers.Route) && _waypoints != null && WaypointError == null) WaypointLayer(v, rw, rh);
                     if (MapLayers.On(lay, MapLayers.Scale)) ScaleBar(v, rw, rh);
                     if (MapLayers.On(lay, MapLayers.North)) North(v, rw, rh);
-                    Places(host, v, rw, rh, lay);
+                    Places(host, v, rw, rh, lay, gameSeconds);
                     if (MapLayers.On(lay, MapLayers.Foes)) Foes(host, v, rw, rh);
                     else LastHostiles = 0;
                     _limit = MaxShapes;
@@ -477,12 +500,12 @@ namespace TimeLightMap
             Text("N", tx, ty, tw, th, StyleChrome);
         }
 
-        /// <summary>The place labels (the "towns" layer): the game's own discovered towns and places (GamePlaces), each a
-        /// diamond with its name. The texts are laid out by PlaceLayout round your people's names, dots and leader lines
-        /// (laid out first, this frame), the scale bar, the N, each other and the other labels' marks: above the mark where
-        /// there is room, else the nearest free spot with a thin leader line, else dropped (small places before towns); a dark
-        /// pill behind each. On a round map every text stays inside the circle.</summary>
-        static void Places(GameHost host, in MapView v, float rw, float rh, int lay)
+        /// <summary>The place labels ("towns") and moving trade caravans ("traders"): discovered towns/places as cream
+        /// diamonds, roaming trade caravans as emerald ringed diamonds (with heading arrows while moving). All texts are laid
+        /// out together by PlaceLayout round your people's names, dots and leader lines, the scale bar, the N, each other and
+        /// the marks: above the mark where there is room, else the nearest free spot with a thin leader line, else dropped; a
+        /// dark pill behind each. On a round map every text stays inside the circle.</summary>
+        static void Places(GameHost host, in MapView v, float rw, float rh, int lay, double gameSeconds)
         {
             var pl = PlaceSpots;
             pl.ClearObstacles();
@@ -519,6 +542,8 @@ namespace TimeLightMap
             }
             int n = MapLayers.On(lay, MapLayers.Towns) ? GamePlacesLayer(host, v, rw, rh) : 0;
             if (n == 0) LastGamePlaces = 0;
+            if (MapLayers.On(lay, MapLayers.Traders)) TradersLayer(host, v, rw, rh, gameSeconds, MapLayers.On(lay, MapLayers.Arrows), ref n);
+            else LastTraders = 0;
             pl.Count = n;
             pl.Solve(rw, rh);
             int shown = 0;
@@ -532,7 +557,7 @@ namespace TimeLightMap
                     Shape(Line, pl.AnchorX[k], pl.AnchorY[k], lx, ly, 1.1f, PalLead, 0f);
                 }
                 Backing(pl.X[k], pl.Y[k], pl.W[k], pl.H[k]);
-                Text(_placeText[k], pl.X[k], pl.Y[k], pl.W[k], pl.H[k], StylePlace);
+                Text(_placeText[k], pl.X[k], pl.Y[k], pl.W[k], pl.H[k], _placeStyle[k]);
             }
             LastPlacesShown = shown;
             LastPlacesDropped = pl.Dropped;
@@ -624,7 +649,160 @@ namespace TimeLightMap
             pl.Key[n] = PlaceLayout.KeyOf(caption, x, z);
             (pl.AnchorX[n], pl.AnchorY[n], pl.Above[n], pl.W[n], pl.H[n], pl.Priority[n]) = (px, py, 7f, tw, th, isTown ? 1 : 0);
             _placeText[n] = caption;
+            _placeStyle[n] = StylePlace;
             n++;
+        }
+
+        /// <summary>Moving trade caravans (the "traders" layer): a failure here switches off only the traders layer
+        /// (TradersError says why; 'topcam traders on' tries again).</summary>
+        static void TradersLayer(GameHost host, in MapView v, float rw, float rh, double gameSeconds, bool arrows, ref int labelCount)
+        {
+            try
+            {
+                Traders(host, v, rw, rh, gameSeconds, arrows, ref labelCount);
+            }
+            catch (Exception e)
+            {
+                Layers = MapLayers.Set(Layers, MapLayers.Traders, false);
+                LastTraders = 0;
+                TradersError = e.GetType().Name + ": " + e.Message;
+                Log.Error("topcam: the moving traders switched off after an error (the other marks stay): " + e);
+                try { TraderWalk.Clear(); } catch { }
+            }
+        }
+
+        /// <summary>Roaming / moving traders (trade caravans, nomad animal traders, faction caravans) on the map, excluding
+        /// stationary town shopkeepers (whose squad is town-owned or tied to a shop building) and hostile squads. Draws a
+        /// bright emerald ringed diamond, a heading arrow while walking, and its label in PlaceSpots. Never inlined: reads
+        /// World.Squads, FactionRelations and CharacterSnapshot.IsTrader inside TradersLayer's try.</summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static void Traders(GameHost host, in MapView v, float rw, float rh, double gameSeconds, bool arrows, ref int labelCount)
+        {
+            int drawn = 0;
+            _seenTraderSquads.Clear();
+            _hostileSquads.Clear();
+            TraderWalk.BeginFrame();
+            try
+            {
+                var session = host.Session;
+                var snapshot = session?.CurrentSnapshot;
+                var squads = session?.World?.Squads;
+                var all = snapshot?.Characters;
+                if (all != null)
+                {
+                    for (int i = 0; i < all.Count; i++)
+                    {
+                        var c = all[i];
+                        if (c == null || c.IsPlayer) continue;
+                        if (c.HostileToPlayer || c.FightsPlayer)
+                        {
+                            if (c.SquadId != 0) _hostileSquads.Add(c.SquadId);
+                            continue;
+                        }
+                        if (drawn >= MaxTraders || !c.IsTrader) continue;
+                        if (c.Body is { } body && (body.Dead || body.Unconscious)) continue;
+
+                        Meitou.Simulation.Factions.Squad sq = null;
+                        if (squads != null && c.SquadId != 0)
+                        {
+                            try { sq = squads.Find(c.SquadId); } catch { sq = null; }
+                        }
+                        if (sq != null)
+                        {
+                            // Stationary town shopkeepers belong to a town or have a home/shop building; roaming caravans do not.
+                            if (sq.TownOwn || sq.Town >= 0 || sq.HomeBuilding != null
+                                || !string.IsNullOrEmpty(sq.AssignedHome) || sq.Shop?.Building != null)
+                                continue;
+                        }
+                        else
+                        {
+                            // Without squad metadata, only treat as a moving trader if actively moving.
+                            var task = c.Task;
+                            if (task != Meitou.Simulation.Movement.CharacterTask.GoTo
+                                && task != Meitou.Simulation.Movement.CharacterTask.Follow
+                                && task != Meitou.Simulation.Movement.CharacterTask.Wander)
+                                continue;
+                        }
+
+                        var at = c.Position;
+                        if (!float.IsFinite(at.X) || !float.IsFinite(at.Z)) continue;
+                        v.ToPixel(at.X, at.Y, at.Z, rw, rh, out float px, out float py);
+                        if (!Inside(px, py, rw, rh, -60f)) continue;
+                        at = host.DrawnPosition(c);
+                        if (!float.IsFinite(at.X) || !float.IsFinite(at.Z)) continue;
+                        v.ToPixel(at.X, float.IsFinite(at.Y) ? at.Y : Ground(v, at.X, at.Z), at.Z, rw, rh, out px, out py);
+                        if (!Inside(px, py, rw, rh, 2f)) continue;
+
+                        if (c.SquadId != 0 && !_seenTraderSquads.Add(c.SquadId)) continue;
+                        string name = CaptionText.TraderLabel(c.Name, sq?.Name);
+                        long trackKey = c.SquadId != 0 ? (long)c.SquadId + 1_000_000_000L : Pack.KeyOf(c);
+                        AddTraderMarker(v, rw, rh, px, py, at.X, at.Z, trackKey, name, gameSeconds, arrows, ref labelCount);
+                        drawn++;
+                    }
+                }
+
+                // Distant roaming trade caravan squads (visible when zoomed out beyond character load distance)
+                if (squads != null && drawn < MaxTraders)
+                {
+                    var pop = host.PopData;
+                    int playerFaction = pop != null ? pop.PlayerFaction : -1;
+                    var relations = pop?.Relations;
+                    try
+                    {
+                        foreach (var sq in squads.All)
+                        {
+                            if (drawn >= MaxTraders) break;
+                            if (sq == null || sq.Dead || sq.Wild || sq.TownOwn || sq.Town >= 0 || sq.Shop == null || sq.HomeBuilding != null)
+                                continue;
+                            if (sq.Faction == playerFaction || _seenTraderSquads.Contains(sq.Id) || _hostileSquads.Contains(sq.Id))
+                                continue;
+                            if (sq.Shop.Building != null || !string.IsNullOrEmpty(sq.AssignedHome)) continue;
+                            if (sq.Members == null || sq.Members.Count == 0) continue;
+                            if (relations != null && playerFaction >= 0 && sq.Faction >= 0 && relations.IsHostile(sq.Faction, playerFaction))
+                                continue;
+                            var at = sq.Position;
+                            if (!float.IsFinite(at.X) || !float.IsFinite(at.Z) || !KnownPlaces.Near(v, at.X, at.Z)) continue;
+                            v.ToPixel(at.X, Ground(v, at.X, at.Z), at.Z, rw, rh, out float px, out float py);
+                            if (!Inside(px, py, rw, rh, 2f)) continue;
+                            _seenTraderSquads.Add(sq.Id);
+                            string name = CaptionText.TraderLabel(null, sq.Name);
+                            AddTraderMarker(v, rw, rh, px, py, at.X, at.Z, (long)sq.Id + 1_000_000_000L, name, gameSeconds, arrows, ref labelCount);
+                            drawn++;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            finally
+            {
+                TraderWalk.EndFrame();
+            }
+            LastTraders = drawn;
+        }
+
+        static void AddTraderMarker(in MapView v, float rw, float rh, float px, float py, double wx, double wz, long trackKey,
+            string name, double gameSeconds, bool arrows, ref int labelCount)
+        {
+            if (TraderWalk.Step(trackKey, wx, wz, gameSeconds, out double dx, out double dz) && arrows)
+                Arrow(v, px, py, 7.5f, dx, dz, PalTrader, rw, rh);
+            Shape(Ring, px, py, 7.2f, 1.6f, 0f, PalTrader, 0f);
+            Shape(Diamond, px, py, 5.0f, 0f, 0f, PalTrader, 0f);
+            var pl = PlaceSpots;
+            pl.AddObstacle(px - 8.5f, py - 8.5f, px + 8.5f, py + 8.5f);
+            if (labelCount >= PlaceLayout.Max || string.IsNullOrEmpty(name)) return;
+            if (!PlaceCaptions.TryGetValue(name, out string caption))
+            {
+                if (PlaceCaptions.Count > 512) PlaceCaptions.Clear();
+                PlaceCaptions[name] = caption = CaptionText.Escape(name);
+            }
+            Size(caption, out float tw, out float th);
+            // Stable key by squad/character id so the label does not jump around while the caravan walks
+            pl.Key[labelCount] = unchecked(trackKey * 1099511628211L ^ 0x545241444552L);
+            (pl.AnchorX[labelCount], pl.AnchorY[labelCount], pl.Above[labelCount], pl.W[labelCount], pl.H[labelCount], pl.Priority[labelCount]) =
+                (px, py, 10f, tw, th, 2);
+            _placeText[labelCount] = caption;
+            _placeStyle[labelCount] = StyleTrader;
+            labelCount++;
         }
 
         /// <summary>A dark rounded pill behind a text (a wide line of the shader), so it reads on bright ground.</summary>
@@ -636,26 +814,33 @@ namespace TimeLightMap
         }
 
         /// <summary>A red dot on every character the game counts as hostile to the player or fighting the player, awake
-        /// and alive, on the picture.</summary>
+        /// and alive, on the picture. Characters actively fighting the player are placed first so large crowds never hide them.</summary>
         static void Foes(GameHost host, in MapView v, float rw, float rh)
         {
             int drawn = 0;
             var all = host.Session?.CurrentSnapshot?.Characters;
             if (all != null)
             {
-                for (int i = 0; i < all.Count && drawn < MaxHostiles; i++)
+                for (int pass = 0; pass < 2 && drawn < MaxHostiles; pass++)
                 {
-                    var c = all[i];
-                    if (c == null || c.IsPlayer || !(c.HostileToPlayer || c.FightsPlayer)) continue;
-                    if (c.Body is { } body && (body.Dead || body.Unconscious)) continue;
-                    var at = c.Position;      // the tick's position first: most are far off the picture
-                    v.ToPixel(at.X, at.Y, at.Z, rw, rh, out float px, out float py);
-                    if (!Inside(px, py, rw, rh, -40f)) continue;
-                    at = host.DrawnPosition(c);
-                    v.ToPixel(at.X, at.Y, at.Z, rw, rh, out px, out py);
-                    if (!Inside(px, py, rw, rh, -5f)) continue;
-                    Shape(Disc, px, py, 4.5f, 0f, 0f, PalHostile, 0f);
-                    drawn++;
+                    bool fightersOnly = pass == 0;
+                    for (int i = 0; i < all.Count && drawn < MaxHostiles; i++)
+                    {
+                        var c = all[i];
+                        if (c == null || c.IsPlayer) continue;
+                        if (fightersOnly ? !c.FightsPlayer : (!c.HostileToPlayer || c.FightsPlayer)) continue;
+                        if (c.Body is { } body && (body.Dead || body.Unconscious)) continue;
+                        var at = c.Position;      // the tick's position first: most are far off the picture
+                        if (!float.IsFinite(at.X) || !float.IsFinite(at.Z)) continue;
+                        v.ToPixel(at.X, at.Y, at.Z, rw, rh, out float px, out float py);
+                        if (!Inside(px, py, rw, rh, -40f)) continue;
+                        at = host.DrawnPosition(c);
+                        if (!float.IsFinite(at.X) || !float.IsFinite(at.Z)) continue;
+                        v.ToPixel(at.X, float.IsFinite(at.Y) ? at.Y : Ground(v, at.X, at.Z), at.Z, rw, rh, out px, out py);
+                        if (!Inside(px, py, rw, rh, -5f)) continue;
+                        Shape(Disc, px, py, 4.5f, 0f, 0f, PalHostile, 0f);
+                        drawn++;
+                    }
                 }
             }
             LastHostiles = drawn;
@@ -724,6 +909,103 @@ namespace TimeLightMap
                 RouteError = e.GetType().Name + ": " + e.Message;
                 Log.Error("topcam: the routes switched off after an error (the other marks stay): " + e);
             }
+        }
+
+        /// <summary>The route handed in by 'topcam waypoints': a dotted line from the middle of your people through every
+        /// waypoint to the end, a dot on each waypoint, a ring and the name (if given) on the end.</summary>
+        static void WaypointLayer(in MapView v, float rw, float rh)
+        {
+            var w = _waypoints;
+            if (w == null || w.X == null || w.X.Length == 0) return;
+            int limit = _limit;
+            _limit = Math.Min(limit, ShapeCount + MaxWaypointShapes);
+            try
+            {
+                int n = 0;
+                if (Pack.HasCentre)
+                {
+                    v.ToPixel(Pack.CentreX, Pack.CentreY, Pack.CentreZ, rw, rh, out _wpX[0], out _wpY[0]);
+                    n = 1;
+                }
+                int start = n;
+                for (int i = 0; i < w.X.Length && n <= MaxWaypoints; i++)
+                {
+                    v.ToPixel(w.X[i], Ground(v, w.X[i], w.Z[i]), w.Z[i], rw, rh, out float px, out float py);
+                    if (!float.IsFinite(px) || !float.IsFinite(py)) continue;
+                    _wpX[n] = px;
+                    _wpY[n] = py;
+                    n++;
+                }
+                if (n - start <= 0) return;
+                float gap = 6f;
+                int kept;
+                while (true)
+                {
+                    kept = Thin(n, start, gap, dryRun: true);
+                    if (kept <= MaxWaypointDots || gap > 400f) break;
+                    gap *= 1.5f;
+                }
+                n = Thin(n, start, gap, dryRun: false);
+                float along = 0f;
+                for (int j = n - 1; j >= 1; j--)
+                {
+                    float x0 = _wpX[j - 1], y0 = _wpY[j - 1], x1 = _wpX[j], y1 = _wpY[j];
+                    if (!(MathF.Max(x0, x1) < -16f || MathF.Min(x0, x1) > rw + 16f || MathF.Max(y0, y1) < -16f || MathF.Min(y0, y1) > rh + 16f))
+                        Shape(Dots, x0, y0, x1, y1, 2.5f, PalRoute, along);
+                    along += MathF.Sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+                }
+                for (int j = Math.Max(start, 0); j < n - 1; j++)
+                {
+                    if (!Inside(_wpX[j], _wpY[j], rw, rh, -4f)) continue;
+                    Shape(Disc, _wpX[j], _wpY[j], 2.6f, 0f, 0f, PalRoute, 0f);
+                    LastWaypointDots++;
+                }
+                float ex = _wpX[n - 1], ey = _wpY[n - 1];
+                if (Inside(ex, ey, rw, rh, -12f))
+                {
+                    Shape(Ring, ex, ey, 8f, 2.2f, 0f, PalRoute, 0f);
+                    Shape(Disc, ex, ey, 3.2f, 0f, 0f, PalRoute, 0f);
+                    if (!string.IsNullOrEmpty(w.Name))
+                    {
+                        string caption = CaptionText.Escape(w.Name);
+                        Size(caption, out float tw, out float th);
+                        float tx = ex - tw * 0.5f, ty = ey - 10f - th;
+                        Backing(tx, ty, tw, th);
+                        Text(caption, tx, ty, tw, th, StylePlace);
+                    }
+                }
+                LastWaypointsDrawn = n - start;
+            }
+            catch (Exception e)
+            {
+                WaypointError = e.GetType().Name + ": " + e.Message;
+                Log.Error("topcam: the waypoint route switched off after an error (the other marks stay): " + e);
+            }
+            finally
+            {
+                _limit = limit;
+            }
+        }
+
+        static int Thin(int n, int start, float gap, bool dryRun)
+        {
+            float g2 = gap * gap;
+            int k = 0;
+            float lx = 0, ly = 0;
+            for (int i = 0; i < n; i++)
+            {
+                bool keep = i < start || i == n - 1 || k == 0;
+                if (!keep)
+                {
+                    float dx = _wpX[i] - lx, dy = _wpY[i] - ly;
+                    keep = dx * dx + dy * dy >= g2;
+                }
+                if (!keep) continue;
+                (lx, ly) = (_wpX[i], _wpY[i]);
+                if (!dryRun) (_wpX[k], _wpY[k]) = (_wpX[i], _wpY[i]);
+                k++;
+            }
+            return k;
         }
 
         static void Routes(in MapView v, float rw, float rh)
@@ -1011,7 +1293,7 @@ namespace TimeLightMap
             return i < a.Count && double.TryParse(a[i], NumberStyles.Float, Ci, out v) && double.IsFinite(v);
         }
 
-        /// <summary>Resets console-only mark tuning back to the defaults ('topcam reset').</summary>
+        /// <summary>Resets console-only mark tuning and transient layer errors back to the defaults ('topcam reset').</summary>
         public static void ResetDefaults()
         {
             ConeReach = ViewCone.DefaultReach;
@@ -1020,6 +1302,11 @@ namespace TimeLightMap
                 Palette[(int)PalConeFill * 4 + 3] = 0.18f;
                 PaletteVersion++;
             }
+            PlacesError = TradersError = ConeError = ArrowError = RouteError = WaypointError = null;
+            Walk.Clear();
+            TraderWalk.Clear();
+            Layout.Forget();
+            PlaceSpots.Forget();
         }
 
         /// <summary>Switches one layer, clearing the error that switched it off before when it comes back on.</summary>
@@ -1032,6 +1319,7 @@ namespace TimeLightMap
                 if (layer == MapLayers.Route) RouteError = null;
             }
             if (on && layer == MapLayers.Towns) PlacesError = null;      // 'places on' always tries again
+            if (on && layer == MapLayers.Traders) TradersError = null;   // 'traders on' always tries again
             Layers = MapLayers.Set(Layers, layer, on);
         }
 
@@ -1040,6 +1328,44 @@ namespace TimeLightMap
         {
             switch (a[0].ToLowerInvariant())
             {
+                case "waypoints":
+                {
+                    const string use = "usage: topcam waypoints <x> <z> [<x> <z> ...] [--name <text>]   (a route in world units, the end last; "
+                        + "drawn on the route layer from your people through every point)  |  topcam waypoints clear";
+                    if (a.Count == 2 && a[1].Equals("clear", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _waypoints = null;
+                        return "";
+                    }
+                    int end = a.Count;
+                    string name = null;
+                    for (int i = 1; i < a.Count; i++)
+                        if (a[i].Equals("--name", StringComparison.OrdinalIgnoreCase))
+                        {
+                            end = i;
+                            var nsb = new StringBuilder();
+                            for (int k = i + 1; k < a.Count; k++)
+                            {
+                                if (k > i + 1) nsb.Append(' ');
+                                nsb.Append(a[k]);
+                            }
+                            name = nsb.ToString().Trim();
+                            if (name.Length > 40) name = name.Substring(0, 40);
+                            break;
+                        }
+                    int count = end - 1;
+                    if (count < 2 || count % 2 != 0 || count / 2 > MaxWaypoints) return use;
+                    var xs = new double[count / 2];
+                    var zs = new double[count / 2];
+                    for (int i = 0; i < xs.Length; i++)
+                    {
+                        if (!Num(a, 1 + 2 * i, out xs[i]) || !Num(a, 2 + 2 * i, out zs[i])) return use;
+                        if (Math.Abs(xs[i]) > 1e7 || Math.Abs(zs[i]) > 1e7) return use;
+                    }
+                    WaypointError = null;
+                    _waypoints = new WaypointSet { X = xs, Z = zs, Name = string.IsNullOrEmpty(name) ? null : name, Stamp = ++_waypointStamp };
+                    return "";
+                }
                 case "marks":
                 {
                     if (a.Count != 2 || !MapPrefs.OnOff(a[1], out bool on)) return "usage: topcam marks on|off";
@@ -1063,6 +1389,14 @@ namespace TimeLightMap
                     // the same switch as 'topcam layer foes'
                     if (a.Count != 2 || !MapPrefs.OnOff(a[1], out bool on)) return "usage: topcam hostiles on|off   (the red dots of characters hostile to you; = topcam layer foes)";
                     SetLayer(MapLayers.Foes, on);
+                    return "";
+                }
+                case "traders":
+                case "caravans":
+                {
+                    // the same switch as 'topcam layer traders'
+                    if (a.Count != 2 || !MapPrefs.OnOff(a[1], out bool on)) return "usage: topcam traders on|off   (green markers on moving trade caravans; = topcam layer traders)";
+                    SetLayer(MapLayers.Traders, on);
                     return "";
                 }
                 case "places":
@@ -1146,6 +1480,12 @@ namespace TimeLightMap
             sb.Append(",\"placeTexts\":{\"shown\":").Append(LastPlacesShown).Append(",\"dropped\":").Append(LastPlacesDropped).Append('}');
             // the game's own towns and places: how many were on the last picture, and why the layer went off if it did
             sb.Append(",\"places\":{\"shown\":").Append(LastGamePlaces).Append(",\"error\":").Append(MapMath.JsonText(PlacesError)).Append('}');
+            sb.Append(",\"traders\":{\"shown\":").Append(LastTraders).Append(",\"tracked\":").Append(TraderWalk.Count)
+              .Append(",\"error\":").Append(MapMath.JsonText(TradersError)).Append('}');
+            var wp = _waypoints;
+            sb.Append(",\"waypoints\":{\"n\":").Append(wp?.X?.Length ?? 0).Append(",\"name\":").Append(MapMath.JsonText(wp?.Name))
+              .Append(",\"drawn\":").Append(LastWaypointsDrawn).Append(",\"dots\":").Append(LastWaypointDots)
+              .Append(",\"error\":").Append(MapMath.JsonText(WaypointError)).Append('}');
             sb.Append(",\"arrows\":{\"drawn\":").Append(LastArrows).Append(",\"tracked\":").Append(Walk.Count)
               .Append(",\"error\":").Append(MapMath.JsonText(ArrowError)).Append('}');
             sb.Append(",\"routes\":{\"drawn\":").Append(LastRoutes).Append(",\"same\":").Append(LastRoutesSkipped)

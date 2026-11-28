@@ -1,4 +1,4 @@
-TimeLight Map 1.4.0
+TimeLight Map 1.5.0
 ===================
 
 A live 3D map in a corner of the game window, for MeitouClient.
@@ -11,6 +11,7 @@ rectangle in a corner of the screen (or a circle). It follows your squad and sho
   - where your selected people are walking: a dotted line to the end of their route
   - an orange ring on anyone hurt, a red one on anyone badly hurt
   - characters hostile to you as red dots
+  - moving trade caravans as green ringed diamonds with their names and walk arrows
   - the names of the towns and places you have discovered
   - a dotted cone showing where the main camera is and which way it looks
   - a scale bar and a north arrow
@@ -22,9 +23,10 @@ in a small config file, or in the game's console.
 REQUIREMENTS
 ------------
 
-  - MeitouClient 0.22.x (the open-source engine that runs Kenshi's game files). The mod is built against 0.22.0.
-    The game refuses to load it on anything older than 0.22.0 or from 0.23.0 on.
-    On MeitouClient 0.21.x use TimeLight Map 1.3.1; on 0.20.x use 1.3.0; on 0.19.x use 1.1.0; on 0.17.x use 1.0.0.
+  - MeitouClient 0.24.x (the open-source engine that runs Kenshi's game files). The mod is built against 0.24.0
+    (verified on 0.24.0 and 0.24.1). The game refuses to load it on anything older than 0.24.0 or from 0.25.0 on.
+    On MeitouClient 0.22.x use TimeLight Map 1.4.0; on 0.21.x use 1.3.1; on 0.20.x use 1.3.0; on 0.19.x use 1.1.0; on
+    0.17.x use 1.0.0.
   - It does NOT run on stock Kenshi or on RE_Kenshi. Those ignore the code; nothing happens there.
   - Developed and played on the Linux build (Vulkan). 1.3.0 also loaded on the Windows build of 0.20.1. Not expected
     to work on the macOS (Metal) build.
@@ -49,7 +51,7 @@ INSTALL
      N shows and hides it, Shift+N makes it big, = and - zoom.
 
   The game's log output then has the line:
-         mod       timelight-map: TimeLight Map 1.4.0 ready: 8 patches, 0 failed; ...
+         mod       timelight-map: TimeLight Map 1.5.0 ready: 8 patches, 0 failed; ...
 
   To remove the mod: untick it, or delete the folder. The mod keeps no data in your saves. The game itself notes
   which code mods a save was made with and tells you once when that list has changed; the save loads either way.
@@ -58,14 +60,14 @@ INSTALL
 THE FILE IS CALLED Meitou.Tests.dll. WHY?
 -----------------------------------------
 
-The map needs parts of the engine that MeitouClient 0.22 keeps internal (its renderer and its HUD). The engine lets
+The map needs parts of the engine that MeitouClient 0.24 keeps internal (its renderer and its HUD). The engine lets
 exactly one assembly name see those parts: "Meitou.Tests", the name of its own test project. So the mod's DLL carries
 that name. It contains no tests and nothing of MeitouClient's; it is this mod's own code, and the source is in
-TimeLightMap-1.4.0-source.zip. What this means for you:
+TimeLightMap-1.5.0-source.zip. What this means for you:
 
-  - The mod is tied to MeitouClient 0.22.x. Internal parts change without notice; a new MeitouClient release may need
-    a new build of this mod. The mod declares the versions it accepts (">=0.22.0 <0.23.0"); outside them the game
-    leaves it out with a notice instead of crashing. On a later 0.22.x a part that no longer fits switches itself off
+  - The mod is tied to MeitouClient 0.24.x. Internal parts change without notice; a new MeitouClient release may need
+    a new build of this mod. The mod declares the versions it accepts (">=0.24.0 <0.25.0"); outside them the game
+    leaves it out with a notice instead of crashing. On a later 0.24.x a part that no longer fits switches itself off
     and says so in the log.
   - If a later MeitouClient closes this door, the mod will need another way in.
   - Another mod that uses the same trick ships a file of the same name in its own folder. By the engine's loader each
@@ -139,6 +141,8 @@ game and type  topcam save file  to write the file from what you see.
   marks        on | off                                          on           everything drawn on the picture
   names        on | off                                          on           your people's names
   hostiles     on | off                                          on           red dots on characters hostile to you
+  traders      on | off                                          on           green markers and names on moving trade
+                                                                              caravans (stationary shopkeepers excluded)
   places       on | off                                          on           names of discovered towns and places
   cone         on | off                                          on           the main camera's dotted view cone
   arrows       on | off                                          on           small arrows on your people while they walk
@@ -212,14 +216,16 @@ A command the mod does not understand answers with its usage.
 
 Single kinds of mark (all on at first):
 
-  topcam layer names off            the layers: names | foes | towns | cone | arrows | route | hurt | scale | north,
+  topcam layer names off            the layers: names | foes | towns | cone | arrows | route | hurt | scale | north | traders,
   topcam layer arrows off scale off     or all, each followed by on or off; several in one line
-  topcam layer all on               (hostiles, places and routes work as names too)
+  topcam layer all on               (hostiles, places, routes and caravans work as names too)
                                     names: your squad's names         foes: the red dots of hostile characters
-                                    towns: town and place names       cone: the camera's view cone
-                                    arrows: the arrows on walkers     route: where the selected people walk
-                                    hurt: the rings on hurt people    scale: the scale bar      north: the N arrow
-  topcam cone off                   the same as  topcam layer cone off  (also: places, hostiles)
+                                    traders: green moving caravans    towns: town and place names
+                                    cone: the camera's view cone      arrows: the arrows on walkers
+                                    route: where selected people walk hurt: the rings on hurt people
+                                    scale: the scale bar              north: the N arrow
+  topcam cone off                   the same as  topcam layer cone off  (also: places, hostiles, traders)
+  topcam waypoints x z [x z ...] --name text   draw a multi-point route on the map;  topcam waypoints clear
   topcam textscale 1.3              bigger names and labels (0.5..3)
   topcam cone reach 2 fill 0.25     how long the cone is (0.5..8) and how strong its inside is (0..1)
 
@@ -287,15 +293,20 @@ License as published by the Free Software Foundation, either version 3 of the Li
 version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
 warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The full text is in the file LICENSE.
 
-The complete source code is in TimeLightMap-1.4.0-source.zip, published together with this zip.
+The complete source code is in TimeLightMap-1.5.0-source.zip, published together with this zip.
 
-The mod is built against MeitouClient 0.22.0, which is licensed GPL-3.0-or-later, and patches it at run time with
+The mod is built against MeitouClient 0.24.0, which is licensed GPL-3.0-or-later, and patches it at run time with
 Harmony, which is licensed MIT. Both come with the game; neither is included here. No game data or assets are included.
 
 
 VERSIONS
 --------
 
+1.5.0  Built for MeitouClient 0.24.0 (accepts 0.24.x; verified on 0.24.0 and 0.24.1). New: moving trade caravans shown
+       as emerald-green ringed diamonds with walk arrows and non-overlapping green name labels (traders = on,
+       Settings > Mods > Moving traders, topcam traders on|off; stationary town shopkeepers and hostile factions
+       excluded), plus topcam waypoints for custom multi-point routes. Improved: circular-chord wing tucking for large
+       squads on round maps, round-map shader early-out, active-fighter hostile priority, and full topcam reset.
 1.4.0  Built for MeitouClient 0.22.0 (accepts 0.22.x). New: group auto-zoom (autozoom / minzoom) that eases in closer
        when your squad is huddled together and out as they spread. Improved: balanced two-wing squad name columns,
        leader-line avoidance so town names stay clear, darker text pills and chrome backing. Fixed: window clip and

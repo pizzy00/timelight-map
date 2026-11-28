@@ -347,10 +347,12 @@ static class MapLayerChecks
 
     static void Layers()
     {
-        Check(MapLayers.Count == 9 && MapLayers.Words.Length == MapLayers.Count && MapLayers.All == (1 << MapLayers.Count) - 1, "layers: nine of them");
-        Check(MapLayers.WordList == "names|foes|towns|cone|arrows|scale|north|route|hurt" && MapLayers.WordList == string.Join("|", MapLayers.Words), "layers: the usage text names them all");
+        Check(MapLayers.Count == 10 && MapLayers.Words.Length == MapLayers.Count && MapLayers.All == (1 << MapLayers.Count) - 1, "layers: ten of them");
+        Check(MapLayers.WordList == "names|foes|towns|cone|arrows|scale|north|route|hurt|traders" && MapLayers.WordList == string.Join("|", MapLayers.Words), "layers: the usage text names them all");
         Check(MapLayers.Index("hostiles") == MapLayers.Foes && MapLayers.Index("Places") == MapLayers.Towns && MapLayers.Index("routes") == MapLayers.Route
-              && MapLayers.Index("waypoints") == MapLayers.Route && MapLayers.Index("health") == MapLayers.Hurt, "layers: the other words (hostiles, places, routes, waypoints, health)");
+              && MapLayers.Index("waypoints") == MapLayers.Route && MapLayers.Index("health") == MapLayers.Hurt
+              && MapLayers.Index("trader") == MapLayers.Traders && MapLayers.Index("caravans") == MapLayers.Traders && MapLayers.Index("merchants") == MapLayers.Traders,
+            "layers: the other words (hostiles, places, routes, waypoints, health, caravans, merchants)");
         Check(MapLayers.Set(0, MapLayers.Hurt, true) == 1 << MapLayers.Hurt && MapLayers.Set(MapLayers.All, MapLayers.Route, false) == (MapLayers.All & ~(1 << MapLayers.Route)),
             "layers: Set switches one bit");
         bool idx = true;
@@ -380,10 +382,16 @@ static class MapLayerChecks
         var sb = new StringBuilder();
         MapLayers.Json(sb, MapLayers.All & ~(1 << MapLayers.Cone) & ~(1 << MapLayers.Foes));
         string j = sb.ToString();
-        Check(j == "{\"names\":true,\"foes\":false,\"towns\":true,\"cone\":false,\"arrows\":true,\"scale\":true,\"north\":true,\"route\":true,\"hurt\":true}", "layers: the status object " + j);
+        Check(j == "{\"names\":true,\"foes\":false,\"towns\":true,\"cone\":false,\"arrows\":true,\"scale\":true,\"north\":true,\"route\":true,\"hurt\":true,\"traders\":true}", "layers: the status object " + j);
         bool on = true;
         for (int i = 0; i < MapLayers.Count; i++) on &= MapLayers.On(MapLayers.All, i) && !MapLayers.On(0, i);
         Check(on, "layers: On() reads the bits");
+        Check(CaptionText.TraderLabel("Hive Caravan Boss", "Western Hive") == "Hive Caravan Boss"
+              && CaptionText.TraderLabel("Amanaka", "Trade Caravan") == "Trade Caravan"
+              && CaptionText.TraderLabel("Amanaka", "Traders Guild") == "Traders Guild"
+              && CaptionText.TraderLabel("Amanaka", null) == "Amanaka (Trader)"
+              && CaptionText.TraderLabel(null, null) == "Trade Caravan",
+            "trader labels: descriptive caravan names kept, personal names tagged");
     }
 
     // ------------------------------------------------------------------------------------------------ the captions
