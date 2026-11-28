@@ -1692,4 +1692,34 @@ namespace TimeLightMap
             return health < BadlyHurt ? 2 : health < Hurt ? 1 : 0;
         }
     }
+
+    /// <summary>Smoothly eases and gently pulses the map rim's combat glow (0..1) while fighting is active, with a short
+    /// hold window so pauses between sword swings do not flicker.</summary>
+    internal struct CombatGlowEase
+    {
+        public const double HoldSeconds = 2.0, FadeInSeconds = 0.4, FadeOutSeconds = 1.6, PulseRate = 3.2;
+
+        double _fade, _hold, _phase;
+
+        public float Level => (float)Math.Clamp(_fade * (0.78 + 0.22 * (0.5 + 0.5 * Math.Sin(_phase))), 0.0, 1.0);
+        public bool Active => _hold > 0.0;
+
+        public void Reset() => (_fade, _hold, _phase) = (0, 0, 0);
+
+        public float Step(bool fighting, double dt)
+        {
+            if (!double.IsFinite(dt) || dt < 0) dt = 0;
+            dt = Math.Min(dt, 0.25);
+            if (fighting) _hold = HoldSeconds;
+            else if (_hold > 0) _hold = Math.Max(0, _hold - dt);
+
+            if (_hold > 0) _fade = Math.Min(1.0, _fade + dt / FadeInSeconds);
+            else _fade = Math.Max(0.0, _fade - dt / FadeOutSeconds);
+
+            if (_fade > 0.001) _phase = (_phase + dt * PulseRate) % (Math.PI * 2.0);
+            else _phase = 0;
+
+            return Level;
+        }
+    }
 }

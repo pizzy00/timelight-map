@@ -332,6 +332,7 @@ namespace TimeLightMap
             new Opt("rect", "24 24 480 336", "x y w h in window pixels, used only with corner = free"),
             new Opt("shape", "square", "square | round"),
             new Opt("frame", "off", "on: a thin frame round the map"),
+            new Opt("combatglow", "on", "on: soft red glow around the map rim during combat and action"),
             new Opt("follow", "squad", "squad (your active squad) | selected (the people you selected) | camera (where you look) | off (stays put)"),
             new Opt("zoom", "150", "metres across the map (10..5000; widest zoom when autozoom is on)"),
             new Opt("minzoom", "50", "closest metres across when your group is huddled together (with autozoom on; 10..5000)"),
@@ -379,6 +380,11 @@ namespace TimeLightMap
         /// <summary>Other words the config file accepts for a key.</summary>
         static string Canonical(string key) => key.ToLowerInvariant() switch
         {
+            "glow" => "combatglow",
+            "actionglow" => "combatglow",
+            "fightglow" => "combatglow",
+            "redglow" => "combatglow",
+            "combatborder" => "combatglow",
             "towns" => "places",
             "foes" => "hostiles",
             "hostilelabels" => "foelabels",

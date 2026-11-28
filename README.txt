@@ -1,4 +1,4 @@
-TimeLight Map 1.6.0
+TimeLight Map 1.7.0
 ===================
 
 A live 3D map in a corner of the game window, for MeitouClient.
@@ -53,7 +53,7 @@ INSTALL
      N shows and hides it, Shift+N makes it big, = and - zoom.
 
   The game's log output then has the line:
-         mod       timelight-map: TimeLight Map 1.6.0 ready: 8 patches, 0 failed; ...
+         mod       timelight-map: TimeLight Map 1.7.0 ready: 8 patches, 0 failed; ...
 
   To remove the mod: untick it, or delete the folder. The mod keeps no data in your saves. The game itself notes
   which code mods a save was made with and tells you once when that list has changed; the save loads either way.
@@ -65,7 +65,7 @@ THE FILE IS CALLED Meitou.Tests.dll. WHY?
 The map needs parts of the engine that MeitouClient 0.24 keeps internal (its renderer and its HUD). The engine lets
 exactly one assembly name see those parts: "Meitou.Tests", the name of its own test project. So the mod's DLL carries
 that name. It contains no tests and nothing of MeitouClient's; it is this mod's own code, and the source is in
-TimeLightMap-1.6.0-source.zip. What this means for you:
+TimeLightMap-1.7.0-source.zip. What this means for you:
 
   - The mod is tied to MeitouClient 0.24.x. Internal parts change without notice; a new MeitouClient release may need
     a new build of this mod. The mod declares the versions it accepts (">=0.24.0 <0.25.0"); outside them the game
@@ -123,6 +123,8 @@ game and type  topcam save file  to write the file from what you see.
                                                                               kept to the side nearer the window's edge)
   shape        square | round                                    square       round: a circle, the game shows round it
   frame        on | off                                          off          a thin two-tone frame round the map
+  combatglow   on | off                                          on           soft light-red glow around the map rim
+                                                                              while fighting or action is happening
   follow       squad | selected | camera | off                   squad        squad: your active squad
                                                                               selected: the people you select (the squad
                                                                               when nobody is selected)
@@ -200,6 +202,7 @@ Everyday:
   topcam margin 40                  pixels from the window's edges (0..400)
   topcam shape round                a round map;  topcam shape square
   topcam frame on                   a thin frame round the map;  topcam frame off
+  topcam combatglow on              soft light-red rim glow during combat (on by default);  topcam combatglow off
   topcam zoom 150                   metres across the map (10..5000); try 60 for a fight, 600 for travel
   topcam zoom in                    a step closer (1.5 times);  topcam zoom out;  topcam zoom auto  (turns autozoom on)
   topcam autozoom on                zoom in closer when your group is huddled together;  topcam autozoom off
@@ -305,7 +308,7 @@ License as published by the Free Software Foundation, either version 3 of the Li
 version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
 warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The full text is in the file LICENSE.
 
-The complete source code is in TimeLightMap-1.6.0-source.zip, published together with this zip.
+The complete source code is in TimeLightMap-1.7.0-source.zip, published together with this zip.
 
 The mod is built against MeitouClient 0.24.0, which is licensed GPL-3.0-or-later, and patches it at run time with
 Harmony, which is licensed MIT. Both come with the game; neither is included here. No game data or assets are included.
@@ -314,6 +317,9 @@ Harmony, which is licensed MIT. Both come with the game; neither is included her
 VERSIONS
 --------
 
+1.7.0  Built for MeitouClient 0.24.0 (accepts 0.24.x; verified on 0.24.0 and 0.24.1). New: soft light-red combat glow
+       around the map rim during fighting and action (combatglow = on | off, on by default, smooth fade and gentle
+       pulse, toggleable in Settings > Mods > TimeLight Map, timelight-map.cfg, or topcam combatglow on|off).
 1.6.0  Built for MeitouClient 0.24.0 (accepts 0.24.x; verified on 0.24.0 and 0.24.1). New: smart hostile faction/type
        labels (foelabels = auto | on | off, automatically labeling clustered enemies attacking your squad, e.g.
        "Dust Bandits x6", "Beak Thing x3"), plus optional show-style HUD widgets (all off by default, individually

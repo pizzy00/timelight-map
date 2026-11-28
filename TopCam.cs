@@ -55,7 +55,7 @@ namespace TimeLightMap
     /// </summary>
     internal static class TopCam
     {
-        public const string Version = "1.6.0";
+        public const string Version = "1.7.0";
 
         // ---- settings (set by commands, read by the render hook; both on the main thread) ----
         // The values here are the state before the options run (MapPrefs.Commands, at the first drawn frame): off, top right.
@@ -79,6 +79,7 @@ namespace TimeLightMap
         public static bool HideWithUi = true;       // the map hides while the game's interface is hidden (F7, hud hide, the cinema's clean picture)
         public static bool Round;                   // a circle (the rect made square, the corners see-through)
         public static bool FrameOn;                 // a thin two-tone frame round the map
+        public static bool CombatGlowOn = true;     // soft red rim glow when fighting / action is happening
         public static bool BigOn;                   // the big map: in the middle of the window, BigZoom times wider
         public static float MoveFps;                // a moving map is drawn at most this often (0: every frame)
         public static FollowWho Who = FollowWho.Squad;      // whom 'follow squad' / 'follow selected' keeps the map on
@@ -133,6 +134,9 @@ namespace TimeLightMap
         static float _shownX, _shownY, _shownW, _shownH;
         static float _alphaGoal = 1f, _alphaFrom = 1f, _alphaNow = 1f;
         static double _alphaStart, _alphaOver;
+        static CombatGlowEase _combatGlow;
+        static float _combatGlowLevel;
+        static bool _combatActive;
 
         public static double LastDrawMs, LastBlitMs;
         public static long Draws;
@@ -212,6 +216,9 @@ namespace TimeLightMap
             FlipX = FlipY = Shadows = false;
             NoFog = NoHaze = Wide = true;
             ManualExposure = -1f;
+            _combatGlow.Reset();
+            _combatGlowLevel = 0f;
+            _combatActive = false;
             MapHud.ClipOn = true;
             MapHud.ClipError = null;
             Marks.ResetDefaults();
@@ -381,8 +388,10 @@ namespace TimeLightMap
             }
 
             long t1 = Stopwatch.GetTimestamp();
+            _combatActive = CombatGlowOn && ReadCombatActive(host);
+            _combatGlowLevel = CombatGlowOn ? _combatGlow.Step(_combatActive, dt) : 0f;
             int blitY = picture.Desc.Height - (top + rh);
-            bool full = (shapes > 0 || alpha < 1f || Round || FrameOn) && !_fullBroken;
+            bool full = (shapes > 0 || alpha < 1f || Round || FrameOn || _combatGlowLevel > 0.001f) && !_fullBroken;
             try
             {
                 Blit(ctx, gpu, picture, x, blitY, rw, rh, full, full ? alpha : 1f, full ? shapes : 0);
@@ -497,6 +506,40 @@ namespace TimeLightMap
                 if (Marks.On) Marks.Fail("pack", e);
                 if (Target.Mode == TargetMode.Follow) TargetFail(e);
             }
+        }
+
+        /// <summary>True when any living player squad member is in combat or any awake hostile is actively fighting the player.</summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static bool ReadCombatActive(GameHost host)
+        {
+            try
+            {
+                var session = host?.Session;
+                var chars = session?.World?.Characters;
+                if (chars != null)
+                {
+                    int n = Pack.Squad > 0 ? Pack.Squad : Pack.Count;
+                    for (int i = 0; i < n; i++)
+                    {
+                        var c = Pack.Who[i];
+                        if (c == null) continue;
+                        if (chars.IsAlive(c.Id) && chars.Cold(c.Id.Slot)?.InCombat == true) return true;
+                    }
+                }
+                var all = session?.CurrentSnapshot?.Characters;
+                if (all != null)
+                {
+                    for (int i = 0; i < all.Count; i++)
+                    {
+                        var c = all[i];
+                        if (c == null || c.IsPlayer || !c.FightsPlayer) continue;
+                        if (c.Body is { } b && (b.Dead || b.Unconscious)) continue;
+                        return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
         }
 
         /// <summary>The map's strength now: eased (smoothstep) from where it was to the asked value over the asked time.</summary>
@@ -953,6 +996,14 @@ namespace TimeLightMap
                 }
                 float alpha = uMarkRect.w;
                 if (uLook.x > 0.5) alpha *= smoothstep(-0.5, 0.5, edge);
+                if (uLook.z > 0.001)
+                {
+                    float g = clamp(uLook.z, 0.0, 1.0);
+                    float rim = 1.0 - smoothstep(0.0, 26.0, max(edge, 0.0));
+                    float inner = rim * rim * 0.38 * g;
+                    float halo = (1.0 - smoothstep(0.0, 4.0, abs(edge - 1.5))) * 0.70 * g;
+                    c = mix(c, vec3(1.0, 0.28, 0.24), clamp(inner + halo, 0.0, 0.80));
+                }
                 if (uLook.y > 0.5)
                 {
                     c = mix(c, vec3(0.86, 0.80, 0.66), 1.0 - smoothstep(2.6, 3.4, edge));
@@ -1035,7 +1086,7 @@ namespace TimeLightMap
                     program.Set(_fuAuto, adapted != null ? 1 : 0);
                     program.Set(_fuFlip, flip);
                     program.Set(_fuMarkRect, new Vector4(w, h, shapes, Math.Clamp(alpha, 0f, 1f)));
-                    program.Set(_fuLook, new Vector4(Round ? 1f : 0f, FrameOn ? 1f : 0f, 0f, 0f));
+                    program.Set(_fuLook, new Vector4(Round ? 1f : 0f, FrameOn ? 1f : 0f, _combatGlowLevel, 0f));
                     if (shapes > 0) program.Set(_fuShape, new ReadOnlySpan<float>(Marks.Shapes, 0, shapes * 8), 4);
                     if (_palVersion != Marks.PaletteVersion)      // a colour of the palette was changed ('cone fill')
                     {
@@ -1080,7 +1131,7 @@ namespace TimeLightMap
         // ---- commands ----
 
         public static readonly string Usage =
-            "usage: topcam [on|off|toggle | " + MapPrefs.Words + " | big [on|off] | shape square|round | frame on|off"
+            "usage: topcam [on|off|toggle | " + MapPrefs.Words + " | big [on|off] | shape square|round | frame on|off | combatglow on|off"
             + " | quality low|medium|high | marks on|off | layer [<" + MapLayers.WordList + "|all> on|off ...] | hostiles on|off | foelabels auto|on|off | traders on|off | places on|off | squadbars on|off | clock on|off | cats on|off | speed on|off | waypoints <x> <z> [...] [--name <text>] | waypoints clear"
             + " | cone [on|off] [reach <0.5..8>] [fill <0..1>] | pitch <35..90> [--over <s>] | yaw <deg> [--over <s>] | alpha <0..1> [--over <s>]"
             + " | textscale <0.5..3> | hidewithui on|off | keys on|off | bind <" + string.Join("|", MapPrefs.KeyActions) + "> <key>|off"
@@ -1143,6 +1194,14 @@ namespace TimeLightMap
                 case "frame":
                     if (!Switch(out bool frame)) return (false, "usage: topcam frame on|off   (a thin frame round the map)");
                     FrameOn = frame;
+                    (FxError, _fullBroken) = (null, false);
+                    break;
+                case "combatglow":
+                case "glow":
+                case "actionglow":
+                    if (!Switch(out bool glow)) return (false, "usage: topcam combatglow on|off   (soft red glow around the map rim during combat)");
+                    CombatGlowOn = glow;
+                    if (!glow) { _combatGlow.Reset(); _combatGlowLevel = 0f; _combatActive = false; }
                     (FxError, _fullBroken) = (null, false);
                     break;
                 case "quality":
@@ -1398,6 +1457,7 @@ namespace TimeLightMap
             v["rect"] = string.Join(" ", RectX.ToString(ci), RectY.ToString(ci), RectW.ToString(ci), RectH.ToString(ci));
             v["shape"] = Round ? "round" : "square";
             v["frame"] = MapPrefs.OnOffWord(FrameOn);
+            v["combatglow"] = MapPrefs.OnOffWord(CombatGlowOn);
             v["follow"] = FollowWord;
             v["zoom"] = ZoomMetres.ToString("0.#", ci);
             v["minzoom"] = (Target.AutoMinSpan / MapMath.UnitsPerMetre).ToString("0.#", ci);
@@ -1489,6 +1549,9 @@ namespace TimeLightMap
             sb.Append(",\"corner\":").Append(MapMath.JsonText(MapPrefs.CornerName(Corner)));      // null: the rect is 'topcam rect''s
             sb.Append(",\"cornerSize\":").Append(MapMath.Num(CornerSize, "0.#")).Append(",\"cornerMargin\":").Append(CornerMargin.ToString(ci));
             sb.Append(",\"shape\":\"").Append(Round ? "round" : "square").Append("\",\"frame\":").Append(FrameOn ? "true" : "false");
+            sb.Append(",\"combatGlow\":{\"on\":").Append(CombatGlowOn ? "true" : "false")
+              .Append(",\"active\":").Append(_combatActive ? "true" : "false")
+              .Append(",\"level\":").Append(MapMath.Num(_combatGlowLevel, "0.##")).Append('}');
             sb.Append(",\"big\":").Append(BigOn ? "true" : "false");
             sb.Append(",\"embedded\":").Append(Embedding.EmbeddedMode ? "true" : "false");
             sb.Append(",\"follow\":\"").Append(FollowWord).Append('"');

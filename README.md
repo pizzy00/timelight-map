@@ -8,13 +8,14 @@ Squad HP & Fed bars, Day/Clock, Cats, and Game Speed widgets.
 
 Set it up on the game's settings page (Settings > Mods > TimeLight Map), with hotkeys while you play (N show/hide,
 Shift+N big map, `=` / `-` zoom), in a small config file, or in the game's console (`topcam ...`).
-1.6.0 is built for MeitouClient 0.24.x. New in 1.6.0: smart hostile faction/type labels (`foelabels = auto | on | off`,
-automatically labeling enemies attacking your squad), plus optional docked Squad HP & Fed bars (`squadbars`), Day &
-Clock (`clock`), Cats (`cats`), and Game Speed (`speed`) widgets all individually toggleable in **Settings > Mods >
-TimeLight Map**; see the [CHANGELOG](CHANGELOG.md).
+1.7.0 is built for MeitouClient 0.24.x. New in 1.7.0: a soft light-red combat glow around the map rim whenever fighting
+or action is happening (`combatglow = on | off`, on by default, toggleable in **Settings > Mods > TimeLight Map**). Also
+includes smart hostile faction/type labels (`foelabels`), optional docked Squad HP & Fed bars (`squadbars`), Day &
+Clock (`clock`), Cats (`cats`), Game Speed (`speed`), and the `TimeLightMap.Embedding` API for companion UI mods; see
+the [CHANGELOG](CHANGELOG.md).
 
 - **Download:** [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3839458940), [Nexus Mods](https://www.nexusmods.com/kenshi/mods/2285), or the zip under [Releases](../../releases)
-- **Needs:** [MeitouClient](https://github.com/VlcekM/MeitouClient) 0.24.x (TimeLight Map 1.6.0). On MeitouClient 0.22.x use
+- **Needs:** [MeitouClient](https://github.com/VlcekM/MeitouClient) 0.24.x (TimeLight Map 1.7.0). On MeitouClient 0.22.x use
   [1.4.0](../../releases/tag/v1.4.0), on 0.21.x use [1.3.1](../../releases/tag/v1.3.1), on 0.20.x use
   [1.3.0](../../releases/tag/v1.3.0), on 0.19.x use [1.1.0](../../releases/tag/v1.1.0), on 0.17.x use
   [1.0.0](../../releases/tag/v1.0.0). It does not run on stock Kenshi or RE_Kenshi.

@@ -2,6 +2,18 @@
 
 All notable changes to TimeLight Map. The player's manual is [README.txt](README.txt).
 
+## 1.7.0 (2026-11-28)
+
+Built against MeitouClient 0.24.0; accepts 0.24.x (verified against 0.24.0 and 0.24.1).
+
+### New
+
+- **Combat rim glow (`combatglow`, on by default).** When your squad enters combat or hostiles actively attack your
+  people, a soft light-red glow smoothly fades in and gently breathes around the rim of the minimap (working on both
+  round and square maps) with a 2-second hold so brief pauses between swings never flicker, then fades out cleanly once
+  the fight ends. Toggle on **Settings > Mods > TimeLight Map** (`Combat glow`), in `timelight-map.cfg`
+  (`combatglow = on | off`, aliases `glow`, `actionglow`), or in the console (`topcam combatglow on | off`).
+
 ## 1.6.0 (2026-11-28)
 
 Built against MeitouClient 0.24.0; accepts 0.24.x (verified against 0.24.0 and 0.24.1).

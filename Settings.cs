@@ -50,6 +50,9 @@ namespace TimeLightMap
         [Setting("Frame", Hint = "A thin frame round the map")]
         public bool Frame { get; set; }
 
+        [Setting("Combat glow", Hint = "A soft red glow around the map rim while fighting or action is happening")]
+        public bool CombatGlow { get; set; } = true;
+
         [Setting("Follow", Hint = "squad: your active squad; selected: the people you select; camera: where you look; off: stays put",
             Options = new[] { "squad", "selected", "camera", "off" })]
         public string Follow { get; set; } = "squad";
@@ -145,7 +148,7 @@ namespace TimeLightMap
         /// <summary>Each row's property and its option key (MapPrefs.Keys).</summary>
         internal static readonly (string Property, string Key)[] Rows =
         {
-            ("Map", "map"), ("Corner", "corner"), ("Size", "size"), ("Shape", "shape"), ("Frame", "frame"), ("Follow", "follow"),
+            ("Map", "map"), ("Corner", "corner"), ("Size", "size"), ("Shape", "shape"), ("Frame", "frame"), ("CombatGlow", "combatglow"), ("Follow", "follow"),
             ("Zoom", "zoom"), ("AutoZoom", "autozoom"), ("MinZoom", "minzoom"), ("Pitch", "pitch"), ("Alpha", "alpha"), ("Quality", "quality"), ("Marks", "marks"), ("Names", "names"),
             ("Hostiles", "hostiles"), ("FoeLabels", "foelabels"), ("Traders", "traders"), ("Places", "places"), ("Cone", "cone"), ("Arrows", "arrows"), ("Routes", "routes"), ("Hurt", "hurt"),
             ("ScaleBar", "scale"), ("North", "north"), ("SquadBars", "squadbars"), ("Clock", "clock"), ("Cats", "cats"), ("Speed", "speed"),
@@ -191,6 +194,7 @@ namespace TimeLightMap
                 case "size": Size = MapPrefs.Size(text, out double pct) ? (float)pct : (float)MapPrefs.Medium; break;
                 case "shape": Shape = MapPrefs.Shape(text, out bool round) && round ? "round" : "square"; break;
                 case "frame": Frame = Switch(text, false); break;
+                case "combatglow": CombatGlow = Switch(text, true); break;
                 case "follow": Follow = Pick(FollowOptions, text, "squad"); break;
                 case "zoom": Zoom = Number(text, (float)MapPrefs.MinZoom, (float)MapPrefs.MaxZoom, (float)MapPrefs.DefaultZoom); break;
                 case "autozoom": AutoZoom = Switch(text, true); break;
@@ -232,6 +236,7 @@ namespace TimeLightMap
             "size" => Size.ToString("0.#", Ci),
             "shape" => Shape,
             "frame" => MapPrefs.OnOffWord(Frame),
+            "combatglow" => MapPrefs.OnOffWord(CombatGlow),
             "follow" => Follow,
             "zoom" => Zoom.ToString("0.#", Ci),
             "autozoom" => MapPrefs.OnOffWord(AutoZoom),

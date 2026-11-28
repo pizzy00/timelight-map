@@ -8,6 +8,7 @@ margin = 24             # pixels from the window's edges (0..400)
 rect = 24 24 480 336    # x y w h in window pixels, used only with corner = free
 shape = square          # square | round
 frame = off             # on: a thin frame round the map
+combatglow = on         # on: soft red glow around the map rim during combat and action
 follow = squad          # squad (your active squad) | selected (the people you selected) | camera (where you look) | off (stays put)
 zoom = 150              # metres across the map (10..5000; widest zoom when autozoom is on)
 minzoom = 50            # closest metres across when your group is huddled together (with autozoom on; 10..5000)

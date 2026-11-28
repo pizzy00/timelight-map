@@ -37,7 +37,7 @@ namespace TimeLightMap
                 TopCam.Usage.Substring("usage: ".Length),
                 "TimeLight Map: a live 3D view of the world from above, drawn in a corner of the game window. "
                 + "on|off|toggle; big [on|off] (the big map); corner top-left|top-right|bottom-left|bottom-right|free; size small|medium|large|<10..60>; "
-                + "zoom <metres across>|in|out|auto; minzoom <metres>; autozoom on|off; follow squad|selected|camera|off; shape square|round; frame on|off; quality low|medium|high; "
+                + "zoom <metres across>|in|out|auto; minzoom <metres>; autozoom on|off; follow squad|selected|camera|off; shape square|round; frame on|off; combatglow on|off; quality low|medium|high; "
                 + "marks on|off; layer <" + MapLayers.WordList + "> on|off (one kind of mark); foelabels auto|on|off; traders on|off; squadbars|clock|cats|speed on|off; pitch <35..90> (tilt); alpha <0..1> (strength); "
                 + "keys on|off, bind <toggle|big|zoomin|zoomout> <key> (hotkeys); save [file] (keep the options); reset; "
                 + "also: yaw, view, rect, ease and the picture settings (world units, 10 = 1 m; north up at yaw 0). "

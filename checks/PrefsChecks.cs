@@ -10,7 +10,7 @@ static class PrefsChecks
 
     const string Marks = "marks on|layer names on|layer foes on|foelabels auto|layer traders on|layer towns on|layer cone on|layer arrows on|layer route on|layer hurt on|layer scale on|layer north on|squadbars off|clock off|cats off|speed off";
     const string Keys = "keys on|bind toggle N|bind big Shift+N|bind zoomin Equal|bind zoomout Minus";
-    const string DefaultRun = "corner top-right|size medium|margin 24|shape square|frame off|follow squad|zoom 150|minzoom 50|autozoom on|pitch 90 --over 0|yaw 0 --over 0|alpha 1|quality high|"
+    const string DefaultRun = "corner top-right|size medium|margin 24|shape square|frame off|combatglow on|follow squad|zoom 150|minzoom 50|autozoom on|pitch 90 --over 0|yaw 0 --over 0|alpha 1|quality high|"
                               + Marks + "|textscale 1|hidewithui on|" + Keys + "|on";
 
     public static void Run(Action<bool, string> Check)

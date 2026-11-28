@@ -125,12 +125,24 @@ static class V130Checks
         Check(same, "a written config file reads back as the same options (" + string.Join("; ", faults) + ")");
         Check(MapPrefs.Sample == MapPrefs.Render(MapPrefs.Defaults()), "the sample file is the defaults, written");
         // the other words of the file's keys
-        var list = MapPrefs.Commands("towns = off\nfoes = off\nhostilelabels = on\ncaravans = off\nroute = off\nwaypoints = off\nbars = on\ntime = on\nmoney = on\ngamespeed = on", out faults);
+        var list = MapPrefs.Commands("glow = off\ntowns = off\nfoes = off\nhostilelabels = on\ncaravans = off\nroute = off\nwaypoints = off\nbars = on\ntime = on\nmoney = on\ngamespeed = on", out faults);
         string f = Flat(list);
-        Check(faults.Count == 0 && f.Contains("|layer towns off|") && f.Contains("|layer foes off|") && f.Contains("|foelabels on|")
+        Check(faults.Count == 0 && f.Contains("|combatglow off|") && f.Contains("|layer towns off|") && f.Contains("|layer foes off|") && f.Contains("|foelabels on|")
               && f.Contains("|layer traders off|") && f.Contains("|layer route off|") && f.Contains("|squadbars on|")
               && f.Contains("|clock on|") && f.Contains("|cats on|") && f.Contains("|speed on|"),
-            "the keys' other words: towns, foes, hostilelabels, caravans, route, waypoints, bars, time, money, gamespeed: " + f);
+            "the keys' other words: glow, towns, foes, hostilelabels, caravans, route, waypoints, bars, time, money, gamespeed: " + f);
+        // CombatGlowEase: smooth fade-in, 2s hold without flicker, breathing pulse, smooth fade-out, Reset clears immediately
+        var cg = new CombatGlowEase();
+        Check(cg.Level == 0f && !cg.Active, "combat glow starts at 0");
+        for (int i = 0; i < 60; i++) cg.Step(true, 1.0 / 60.0);
+        Check(cg.Active && cg.Level >= 0.75f && cg.Level <= 1.0f, "combat glow fades in smoothly during combat (" + cg.Level.ToString("0.00") + ")");
+        for (int i = 0; i < 60; i++) cg.Step(false, 1.0 / 60.0);
+        Check(cg.Active && cg.Level >= 0.75f, "combat glow holds steady during 1s combat pause (" + cg.Level.ToString("0.00") + ")");
+        for (int i = 0; i < 300; i++) cg.Step(false, 1.0 / 60.0);
+        Check(!cg.Active && cg.Level == 0f, "combat glow fades cleanly back to 0 after hold expires");
+        cg.Step(true, 0.25);
+        cg.Reset();
+        Check(cg.Level == 0f && !cg.Active, "combat glow Reset clears immediately");
         Check(MapPrefs.FoeLabels("auto", out var flm) && flm == FoeLabelMode.Auto
               && MapPrefs.FoeLabels("smart", out flm) && flm == FoeLabelMode.Auto
               && MapPrefs.FoeLabels("on", out flm) && flm == FoeLabelMode.On
