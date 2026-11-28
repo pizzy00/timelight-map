@@ -125,10 +125,19 @@ static class V130Checks
         Check(same, "a written config file reads back as the same options (" + string.Join("; ", faults) + ")");
         Check(MapPrefs.Sample == MapPrefs.Render(MapPrefs.Defaults()), "the sample file is the defaults, written");
         // the other words of the file's keys
-        var list = MapPrefs.Commands("towns = off\nfoes = off\ncaravans = off\nroute = off\nwaypoints = off", out faults);
+        var list = MapPrefs.Commands("towns = off\nfoes = off\nhostilelabels = on\ncaravans = off\nroute = off\nwaypoints = off\nbars = on\ntime = on\nmoney = on\ngamespeed = on", out faults);
         string f = Flat(list);
-        Check(faults.Count == 0 && f.Contains("|layer towns off|") && f.Contains("|layer foes off|") && f.Contains("|layer traders off|") && f.Contains("|layer route off|"),
-            "the keys' other words: towns, foes, caravans, route, waypoints: " + f);
+        Check(faults.Count == 0 && f.Contains("|layer towns off|") && f.Contains("|layer foes off|") && f.Contains("|foelabels on|")
+              && f.Contains("|layer traders off|") && f.Contains("|layer route off|") && f.Contains("|squadbars on|")
+              && f.Contains("|clock on|") && f.Contains("|cats on|") && f.Contains("|speed on|"),
+            "the keys' other words: towns, foes, hostilelabels, caravans, route, waypoints, bars, time, money, gamespeed: " + f);
+        Check(MapPrefs.FoeLabels("auto", out var flm) && flm == FoeLabelMode.Auto
+              && MapPrefs.FoeLabels("smart", out flm) && flm == FoeLabelMode.Auto
+              && MapPrefs.FoeLabels("on", out flm) && flm == FoeLabelMode.On
+              && MapPrefs.FoeLabels("all", out flm) && flm == FoeLabelMode.On
+              && MapPrefs.FoeLabels("off", out flm) && flm == FoeLabelMode.Off
+              && !MapPrefs.FoeLabels("maybe", out _),
+            "foelabels words: auto/smart, on/all, off; bad refused");
         Check(Flat(MapPrefs.CommandsOf("key_big", "Shift+N", false)) == "bind big Shift+N" && MapPrefs.CommandsOf("rect", "1 2 30 40", false).Count == 0
               && Flat(MapPrefs.CommandsOf("hostiles", "off", false)) == "layer foes off" && Flat(MapPrefs.CommandsOf("places", "on", false)) == "layer towns on",
             "single options as commands (the settings page's changes)");

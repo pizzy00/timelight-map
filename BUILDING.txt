@@ -1,4 +1,4 @@
-Building TimeLight Map 1.5.0 from source
+Building TimeLight Map 1.6.0 from source
 ========================================
 
 You need:
@@ -15,7 +15,7 @@ Copy it into <Kenshi>/mods/. To write it elsewhere: add  -p:PackageDir=<folder>
 
 The build is deterministic: the same sources, the same .NET SDK version and the same game assemblies give the same
 DLL, byte for byte, whether the sources come from a git clone or from the source zip (.gitattributes keeps LF line
-endings; SourceLink is off). The 1.5.0 release DLL was built with the .NET SDK 9.0.321 on Linux against MeitouClient
+endings; SourceLink is off). The 1.6.0 release DLL was built with the .NET SDK 9.0.321 on Linux against MeitouClient
 0.24.0; another SDK version builds a working DLL with different bytes.
 
 Checks (the pure code: corners, sizes, the config file, layers, label and place layouts, routes, the round map, keys;
@@ -32,6 +32,7 @@ Files:
     TimeLightMap.csproj        the project; read its comments for why it references the game's own framework assemblies
                                and why the assembly is named Meitou.Tests
     Entry.cs                   the mod's entry point and its Harmony patches
+    Embedding.cs               public world-map embedding API for companion UI mods (e.g. NUE)
     Commands.cs                the 'topcam' console command
     Settings.cs                the settings page (Settings > Mods), topcam save, and the hotkeys
     TopCam.cs                  the map picture: the second scene pass, the copy onto the screen, the commands

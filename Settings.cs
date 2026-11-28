@@ -27,6 +27,7 @@ namespace TimeLightMap
         public static readonly string[] ShapeOptions = { "square", "round" };
         public static readonly string[] FollowOptions = { "squad", "selected", "camera", "off" };
         public static readonly string[] QualityOptions = { "low", "medium", "high" };
+        public static readonly string[] FoeLabelOptions = { "auto", "on", "off" };
         // keys no default game binding uses (and Shift / Ctrl ones of them); "custom": the config file's own key
         public static readonly string[] KeyOptions =
         {
@@ -80,6 +81,10 @@ namespace TimeLightMap
         [Setting("Hostiles", Hint = "Red dots on characters hostile to you")]
         public bool Hostiles { get; set; } = true;
 
+        [Setting("Hostile labels", Hint = "auto: labels enemies attacking your squad; on: all visible hostiles; off: red dots only",
+            Options = new[] { "auto", "on", "off" })]
+        public string FoeLabels { get; set; } = "auto";
+
         [Setting("Moving traders", Hint = "Green markers and names on roaming trade caravans")]
         public bool Traders { get; set; } = true;
 
@@ -103,6 +108,18 @@ namespace TimeLightMap
 
         [Setting("North arrow")]
         public bool North { get; set; } = true;
+
+        [Setting("Squad HP & Fed bars", Hint = "Docked Squad HP and Squad Fed bars below (or above) the map")]
+        public bool SquadBars { get; set; }
+
+        [Setting("Day & clock", Hint = "Show the in-game day and clock time on the map")]
+        public bool Clock { get; set; }
+
+        [Setting("Cats (money)", Hint = "Show your current Cats on the map")]
+        public bool Cats { get; set; }
+
+        [Setting("Game speed", Hint = "Show the current game speed or PAUSED on the map")]
+        public bool Speed { get; set; }
 
         [Setting("Text size", Min = 0.5, Max = 3, Step = 0.1)]
         public float TextScale { get; set; } = 1f;
@@ -130,8 +147,9 @@ namespace TimeLightMap
         {
             ("Map", "map"), ("Corner", "corner"), ("Size", "size"), ("Shape", "shape"), ("Frame", "frame"), ("Follow", "follow"),
             ("Zoom", "zoom"), ("AutoZoom", "autozoom"), ("MinZoom", "minzoom"), ("Pitch", "pitch"), ("Alpha", "alpha"), ("Quality", "quality"), ("Marks", "marks"), ("Names", "names"),
-            ("Hostiles", "hostiles"), ("Traders", "traders"), ("Places", "places"), ("Cone", "cone"), ("Arrows", "arrows"), ("Routes", "routes"), ("Hurt", "hurt"),
-            ("ScaleBar", "scale"), ("North", "north"), ("TextScale", "textscale"), ("HideWithUi", "hidewithui"), ("Keys", "keys"),
+            ("Hostiles", "hostiles"), ("FoeLabels", "foelabels"), ("Traders", "traders"), ("Places", "places"), ("Cone", "cone"), ("Arrows", "arrows"), ("Routes", "routes"), ("Hurt", "hurt"),
+            ("ScaleBar", "scale"), ("North", "north"), ("SquadBars", "squadbars"), ("Clock", "clock"), ("Cats", "cats"), ("Speed", "speed"),
+            ("TextScale", "textscale"), ("HideWithUi", "hidewithui"), ("Keys", "keys"),
             ("KeyToggle", "key_toggle"), ("KeyBig", "key_big"), ("KeyZoomIn", "key_zoomin"), ("KeyZoomOut", "key_zoomout"),
         };
 
@@ -183,6 +201,7 @@ namespace TimeLightMap
                 case "marks": Marks = Switch(text, true); break;
                 case "names": Names = Switch(text, true); break;
                 case "hostiles": Hostiles = Switch(text, true); break;
+                case "foelabels": FoeLabels = MapPrefs.FoeLabels(text, out var flm) ? MapPrefs.FoeLabelsWord(flm) : "auto"; break;
                 case "traders": Traders = Switch(text, true); break;
                 case "places": Places = Switch(text, true); break;
                 case "cone": Cone = Switch(text, true); break;
@@ -191,6 +210,10 @@ namespace TimeLightMap
                 case "hurt": Hurt = Switch(text, true); break;
                 case "scale": ScaleBar = Switch(text, true); break;
                 case "north": North = Switch(text, true); break;
+                case "squadbars": SquadBars = Switch(text, false); break;
+                case "clock": Clock = Switch(text, false); break;
+                case "cats": Cats = Switch(text, false); break;
+                case "speed": Speed = Switch(text, false); break;
                 case "textscale": TextScale = Number(text, 0.5f, 3f, 1f); break;
                 case "hidewithui": HideWithUi = Switch(text, true); break;
                 case "keys": Keys = Switch(text, true); break;
@@ -219,6 +242,7 @@ namespace TimeLightMap
             "marks" => MapPrefs.OnOffWord(Marks),
             "names" => MapPrefs.OnOffWord(Names),
             "hostiles" => MapPrefs.OnOffWord(Hostiles),
+            "foelabels" => FoeLabels,
             "traders" => MapPrefs.OnOffWord(Traders),
             "places" => MapPrefs.OnOffWord(Places),
             "cone" => MapPrefs.OnOffWord(Cone),
@@ -227,6 +251,10 @@ namespace TimeLightMap
             "hurt" => MapPrefs.OnOffWord(Hurt),
             "scale" => MapPrefs.OnOffWord(ScaleBar),
             "north" => MapPrefs.OnOffWord(North),
+            "squadbars" => MapPrefs.OnOffWord(SquadBars),
+            "clock" => MapPrefs.OnOffWord(Clock),
+            "cats" => MapPrefs.OnOffWord(Cats),
+            "speed" => MapPrefs.OnOffWord(Speed),
             "textscale" => TextScale.ToString("0.##", Ci),
             "hidewithui" => MapPrefs.OnOffWord(HideWithUi),
             "keys" => MapPrefs.OnOffWord(Keys),

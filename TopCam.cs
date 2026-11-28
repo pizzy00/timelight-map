@@ -55,7 +55,7 @@ namespace TimeLightMap
     /// </summary>
     internal static class TopCam
     {
-        public const string Version = "1.5.0";
+        public const string Version = "1.6.0";
 
         // ---- settings (set by commands, read by the render hook; both on the main thread) ----
         // The values here are the state before the options run (MapPrefs.Commands, at the first drawn frame): off, top right.
@@ -91,6 +91,10 @@ namespace TimeLightMap
         // ---- state ----
         static GpuTexture _colour, _depth;
         static int _width, _height;
+        static readonly GpuTexture[] _embedTargets = new GpuTexture[2];
+        static int _embedW, _embedH, _embedSlot;
+        static Embedding.FrameRequest? _embedLastReq;
+        static double _embedNextDraw;
         static LegacyProgram _blit, _full;
         static SamplerSlot _sTop, _sAdapted, _fsTop, _fsAdapted;
         static UniformHandle _uExposure, _uAuto, _uFlip, _fuExposure, _fuAuto, _fuFlip, _fuMarkRect, _fuPal, _fuShape, _fuLook;
@@ -139,7 +143,7 @@ namespace TimeLightMap
         // Harmony prefix on TerrainRenderer.Draw: the main view's call (not the reflection's, not ours) carries the frame's light.
         public static void TerrainDrawPrefix(WorldRenderOptions options, WorldLighting light, bool secondary)
         {
-            if (!On || secondary) return;
+            if ((!On && !Embedding.EmbeddedMode) || secondary) return;
             _light = light;
             _mainOptions = options;
             _lightFrame = _frame;
@@ -152,6 +156,22 @@ namespace TimeLightMap
             _frame++;
             if (_prefs != null) RunPrefs();
             while (Pending.TryDequeue(out var words)) RunQueued(words);
+            if (Embedding.EmbeddedMode)
+            {
+                _shownStamp = 0;
+                if (Embedding.PendingFrame is { } req)
+                {
+                    try { FrameEmbedded(__instance, req); }
+                    catch (Exception e)
+                    {
+                        Embedding.InvalidateFrame();
+                        Log.Error("topcam embedded frame failed: " + e.GetType().Name + ": " + e.Message);
+                    }
+                }
+                else _embedLastReq = null;
+                return;
+            }
+            if (_embedTargets[0] != null || _embedTargets[1] != null) FreeEmbedTargets();
             if (!On)
             {
                 _shownStamp = 0;
@@ -166,6 +186,7 @@ namespace TimeLightMap
             {
                 On = false;
                 _shownStamp = 0;
+                Embedding.SetRendererReady(false);
                 Error = e.GetType().Name + ": " + e.Message;
                 Log.Error("topcam switched off after an error: " + e);
             }
@@ -378,6 +399,90 @@ namespace TimeLightMap
             LastBlitMs = Stopwatch.GetElapsedTime(t1).TotalMilliseconds;
             (_shownX, _shownY, _shownW, _shownH) = (x, top, rw, rh);
             _shownStamp = Stopwatch.GetTimestamp();
+        }
+
+        /// <summary>Renders a requested world rectangle into a double-buffered display-ready UI texture for an external
+        /// embedding consumer (such as NUE's world-map tab). North-up, straight down, no minimap frame or overlay marks.</summary>
+        static void FrameEmbedded(GameHost host, Embedding.FrameRequest req)
+        {
+            var gpu = host.Gpu;
+            if (gpu == null || gpu.Terrain == null) { Embedding.InvalidateFrame(); return; }
+            var chain = gpu.PostChain;
+            var ctx = chain?.Context;
+            if (ctx == null || ctx.PassOpen) return;
+            if (_lightFrame != _frame - 1 || _mainOptions == null) { Embedding.InvalidateFrame(); return; }
+
+            double minX = req.WorldBounds.X, minZ = req.WorldBounds.Y, maxX = req.WorldBounds.Z, maxZ = req.WorldBounds.W;
+            double span = maxX - minX, spanZ = maxZ - minZ;
+            if (!(span > 0) || !(spanZ > 0) || !double.IsFinite(span) || !double.IsFinite(spanZ))
+            {
+                Embedding.InvalidateFrame();
+                return;
+            }
+            double cx = (minX + maxX) * 0.5, cz = (minZ + maxZ) * 0.5;
+            float ground = gpu.Terrain.HeightAt((float)cx, (float)cz);
+            if (!float.IsFinite(ground))
+            {
+                Embedding.InvalidateFrame();
+                return;
+            }
+
+            int w = Math.Clamp(req.Width, 16, 2048), h = Math.Clamp(req.Height, 16, 2048);
+            double now = Clock.Elapsed.TotalSeconds;
+            if (_embedLastReq.HasValue && _embedLastReq.Value == req && _embedW == w && _embedH == h && now < _embedNextDraw)
+                return;
+
+            var view = new MapView { Cx = cx, Cy = ground, Cz = cz, Span = span, SpanZ = spanZ, FlipX = false, FlipY = false, Valid = true };
+            view.Angles(0, 90);
+
+            long t0 = Stopwatch.GetTimestamp();
+            EnsureTargets(ctx, w, h);
+            EnsureEmbedTargets(ctx, w, h);
+            DrawTop(ctx, gpu, host, view);
+
+            int slot = (_embedSlot + 1) & 1;
+            var outTex = _embedTargets[slot];
+            bool savedFx = FlipX, savedFy = FlipY;
+            FlipX = FlipY = false;
+            try
+            {
+                Blit(ctx, gpu, outTex, 0, 0, w, h, full: false, alpha: 1f, shapes: 0);
+            }
+            finally
+            {
+                FlipX = savedFx;
+                FlipY = savedFy;
+            }
+            _embedSlot = slot;
+            _embedLastReq = req;
+            _embedNextDraw = now + 1.0 / Math.Clamp(Fps, 0.2f, 240f);
+            LastDrawMs = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+            Draws++;
+            Embedding.Publish(req, outTex, new SampledTexture(_linear, outTex.View()), ctx.RenderTargetsBottomUp);
+        }
+
+        static void EnsureEmbedTargets(IGpuContext ctx, int w, int h)
+        {
+            if (_embedTargets[0] != null && _embedTargets[1] != null && w == _embedW && h == _embedH) return;
+            FreeEmbedTargets();
+            for (int i = 0; i < 2; i++)
+            {
+                _embedTargets[i] = ctx.CreateTexture(new TextureDesc(InternalFormat.Rgba8, w, h,
+                    Use: TextureUse.Sampled | TextureUse.ColourTarget, Name: "topcam embed " + i));
+            }
+            (_embedW, _embedH, _embedSlot) = (w, h, 0);
+        }
+
+        static void FreeEmbedTargets()
+        {
+            Embedding.InvalidateFrame();
+            for (int i = 0; i < _embedTargets.Length; i++)
+            {
+                try { _embedTargets[i]?.Dispose(); } catch { }
+                _embedTargets[i] = null;
+            }
+            (_embedW, _embedH, _embedSlot) = (0, 0, 0);
+            _embedLastReq = null;
         }
 
         static void ReadPack(GameHost host)
@@ -976,7 +1081,7 @@ namespace TimeLightMap
 
         public static readonly string Usage =
             "usage: topcam [on|off|toggle | " + MapPrefs.Words + " | big [on|off] | shape square|round | frame on|off"
-            + " | quality low|medium|high | marks on|off | layer [<" + MapLayers.WordList + "|all> on|off ...] | hostiles on|off | traders on|off | places on|off | waypoints <x> <z> [...] [--name <text>] | waypoints clear"
+            + " | quality low|medium|high | marks on|off | layer [<" + MapLayers.WordList + "|all> on|off ...] | hostiles on|off | foelabels auto|on|off | traders on|off | places on|off | squadbars on|off | clock on|off | cats on|off | speed on|off | waypoints <x> <z> [...] [--name <text>] | waypoints clear"
             + " | cone [on|off] [reach <0.5..8>] [fill <0..1>] | pitch <35..90> [--over <s>] | yaw <deg> [--over <s>] | alpha <0..1> [--over <s>]"
             + " | textscale <0.5..3> | hidewithui on|off | keys on|off | bind <" + string.Join("|", MapPrefs.KeyActions) + "> <key>|off"
             + " | save [file] | reset | view <cx> <cz> <span> | view follow [span] | rect <x> <y> <w> <h> | ease <s> | fps <n> | movefps <n>"
@@ -1304,6 +1409,7 @@ namespace TimeLightMap
             v["marks"] = MapPrefs.OnOffWord(Marks.On);
             v["names"] = L(MapLayers.Names);
             v["hostiles"] = L(MapLayers.Foes);
+            v["foelabels"] = MapPrefs.FoeLabelsWord(Marks.FoeLabels);
             v["traders"] = L(MapLayers.Traders);
             v["places"] = L(MapLayers.Towns);
             v["cone"] = L(MapLayers.Cone);
@@ -1312,6 +1418,10 @@ namespace TimeLightMap
             v["hurt"] = L(MapLayers.Hurt);
             v["scale"] = L(MapLayers.Scale);
             v["north"] = L(MapLayers.North);
+            v["squadbars"] = MapPrefs.OnOffWord(Marks.ShowSquadBars);
+            v["clock"] = MapPrefs.OnOffWord(Marks.ShowClock);
+            v["cats"] = MapPrefs.OnOffWord(Marks.ShowCats);
+            v["speed"] = MapPrefs.OnOffWord(Marks.ShowSpeed);
             v["textscale"] = Marks.TextScale.ToString("0.##", ci);
             v["hidewithui"] = MapPrefs.OnOffWord(HideWithUi);
             v["keys"] = MapPrefs.OnOffWord(Hotkeys.On);
@@ -1380,6 +1490,7 @@ namespace TimeLightMap
             sb.Append(",\"cornerSize\":").Append(MapMath.Num(CornerSize, "0.#")).Append(",\"cornerMargin\":").Append(CornerMargin.ToString(ci));
             sb.Append(",\"shape\":\"").Append(Round ? "round" : "square").Append("\",\"frame\":").Append(FrameOn ? "true" : "false");
             sb.Append(",\"big\":").Append(BigOn ? "true" : "false");
+            sb.Append(",\"embedded\":").Append(Embedding.EmbeddedMode ? "true" : "false");
             sb.Append(",\"follow\":\"").Append(FollowWord).Append('"');
             sb.Append(",\"view\":{\"follow\":").Append(Follow ? "true" : "false");
             sb.Append(",\"cx\":").Append(MapMath.Num(Cx)).Append(",\"cz\":").Append(MapMath.Num(Cz));

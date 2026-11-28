@@ -2,6 +2,34 @@
 
 All notable changes to TimeLight Map. The player's manual is [README.txt](README.txt).
 
+## 1.6.0 (2026-11-28)
+
+Built against MeitouClient 0.24.0; accepts 0.24.x (verified against 0.24.0 and 0.24.1).
+
+### New
+
+- **Smart hostile faction & enemy-type labels (`foelabels`).** Enemies actively attacking or fighting your squad now
+  appear in red with crisp clustered faction/type labels (for example `Dust Bandits x6`, `Hungry Bandits x9`,
+  `Beak Thing x3`, or `Dust Boss (Dust Bandits)`). Choose `auto` (default: smart mode that labels enemies actively
+  attacking your squad while keeping passive enemies as clean red dots), `on` (labels all visible hostile groups), or
+  `off` (red dots only). Toggle on **Settings > Mods > TimeLight Map** (`Hostile labels`), in `timelight-map.cfg`
+  (`foelabels = auto | on | off`), or in the console (`topcam foelabels auto | on | off`).
+- **Optional docked Squad HP & Squad Fed bars (`squadbars`, default `off`).** Adds a sleek dark card docked directly
+  below the minimap (automatically flipping above the map if placed in a bottom corner) showing your active squad's
+  average `SQUAD HP` and organic `SQUAD FED` gradient meters (excluding robots/skeletons) plus a red `N DOWN` alert
+  strip whenever squad members are unconscious or in a coma. Toggle on **Settings > Mods > TimeLight Map**
+  (`Squad HP & Fed bars`), in `timelight-map.cfg` (`squadbars = on | off`), or in the console (`topcam squadbars on | off`).
+- **Optional Day & Clock (`clock`), Cats (`cats`), and Game Speed (`speed`) widgets (all default `off`).** Display
+  in-game day and time (`DAY 580  TIME 5:45 PM`), your current money (`CATS 2,642`), and current simulation speed or
+  `PAUSED` (`SPEED 2x`) cleanly inside the bottom of the minimap around the scale bar, with automatic layout avoidance
+  so squad and place labels never overlap them. Each widget is individually toggleable on **Settings > Mods >
+  TimeLight Map**, in `timelight-map.cfg`, or in the console (`topcam clock|cats|speed on | off`).
+
+- **World-map embedding API (`TimeLightMap.Embedding`, PR #1 by Dimsky).** Exposes TimeLight Map's live top-down 3D
+  terrain render as a double-buffered display-ready UI texture (`ApiVersion = 1`: `TrySetEmbeddedMode`,
+  `TryRequestFrame`, `TryGetFrame`, `ClearRequest`) so companion UI mods such as NUE can render live 3D terrain inside
+  the native world-map tab while restoring TimeLight's normal corner minimap when no consumer is active.
+
 ## 1.5.0 (2026-11-28)
 
 Built against MeitouClient 0.24.0; accepts 0.24.x (verified against 0.24.0 and 0.24.1).

@@ -392,6 +392,63 @@ static class MapLayerChecks
               && CaptionText.TraderLabel("Amanaka", null) == "Amanaka (Trader)"
               && CaptionText.TraderLabel(null, null) == "Trade Caravan",
             "trader labels: descriptive caravan names kept, personal names tagged");
+
+        // hostile faction/type labels and clustering (v1.6.0)
+        Check(CaptionText.FoeLabel("Dust Bandit", "Dust Bandits", 6) == "Dust Bandits x6"
+              && CaptionText.FoeLabel("Beak Thing", "Gutters", 3) == "Beak Thing x3"
+              && CaptionText.FoeLabel("Beak Thing", "Gutters", 1) == "Beak Thing"
+              && CaptionText.FoeLabel("Dust Boss", "Dust Bandits", 1) == "Dust Boss (Dust Bandits)"
+              && CaptionText.FoeLabel("Dust Bandit", "Dust Bandits", 1) == "Dust Bandit"
+              && CaptionText.FoeLabel("Fogman", "Fogmen", 1) == "Fogman"
+              && CaptionText.FoeLabel("Fogman", "Fogmen", 4) == "Fogmen x4"
+              && CaptionText.FoeLabel(null, null, 2) == "Hostiles x2"
+              && CaptionText.FoeLabel(null, null, 1) == "Hostile",
+            "foe labels: faction groups, wildlife species, single leader vs redundant stem");
+
+        var fc = new FoeClusterer();
+        fc.Add(100, 100, 12, "Dust Bandits", "Dust Bandit", false);
+        fc.Add(120, 110, 12, "Dust Bandits", "Dust Boss", true);
+        fc.Add(130, 105, 12, "Dust Bandits", "Dust Bandit", false);
+        fc.Add(260, 260, 19, "Hungry Bandits", "Hungry Bandit", false);
+        fc.Add(270, 265, 19, "Hungry Bandits", "Hungry Bandit", false);
+        fc.Add(40, 200, 7, "Gutters", "Beak Thing", true);
+        fc.Add(50, 205, 7, "Gutters", "Bonedog", true);
+        fc.Build(FoeLabelMode.Auto);
+        Check(fc.ClusterCount == 3 && fc.Label[0] == "Dust Bandits x3" && fc.Fighting[0]
+              && fc.Label[1] == "Beak Thing" && fc.Label[2] == "Bonedog",
+            "foe clusters (auto): labels attacking groups, omits passive bandits, keeps wildlife species separate");
+
+        fc.Clear();
+        fc.Add(100, 100, 12, "Dust Bandits", "Dust Bandit", false);
+        fc.Add(120, 110, 12, "Dust Bandits", "Dust Bandit", false);
+        fc.Build(FoeLabelMode.On);
+        Check(fc.ClusterCount == 1 && fc.Label[0] == "Dust Bandits x2" && !fc.Fighting[0],
+            "foe clusters (on): labels passive hostiles too");
+        fc.Clear();
+        fc.Add(100, 100, 12, "Dust Bandits", "Dust Bandit", true);
+        fc.Build(FoeLabelMode.Off);
+        Check(fc.ClusterCount == 0, "foe clusters (off): no labels");
+
+        // optional HUD widgets formatting (v1.6.0)
+        string clk = MapMath.FormatClock(579 * 24 + 17.75);
+        Check(clk == "#E8B84BDAY #FFFFFF580  #E8B84BTIME #FFFFFF5:45 PM"
+              && CaptionText.ShownLength(clk) == "DAY 580  TIME 5:45 PM".Length,
+            "clock formatting and colour-tag shown length: " + clk);
+        Check(MapMath.FormatClock(0.0, includeTimeWord: false) == "#E8B84BDAY #FFFFFF1  #FFFFFF12:00 AM"
+              && MapMath.FormatClock(double.NaN) == "",
+            "clock midnight day 1 and NaN guard");
+        Check(MapMath.FormatCats(2642) == "#E8B84BCATS #FFFFFF2,642" && MapMath.FormatCats(0) == "#E8B84BCATS #FFFFFF0",
+            "cats formatting");
+        Check(MapMath.FormatSpeed(true, 2) == "#FF5E52PAUSED" && MapMath.FormatSpeed(false, 2) == "#E8B84BSPEED #FFFFFF2x"
+              && MapMath.FormatSpeed(false, 5) == "#E8B84BSPEED #FFFFFF5x",
+            "speed formatting");
+        Check(Math.Abs(MapMath.FedPercent(3f) - 100f) < 0.01f && Math.Abs(MapMath.FedPercent(1.5f) - 50f) < 0.01f
+              && Math.Abs(MapMath.FedPercent(150f) - 50f) < 0.01f && MapMath.FedPercent(float.NaN) < 0f,
+            "fed percent handles 0..3 and 0..300 scales");
+        MapMath.BarRampRgb(0f, out float r0, out float g0, out _);
+        MapMath.BarRampRgb(1f, out float r1, out float g1, out _);
+        Check(r0 > g0 && g1 > r1 && MapMath.MeterTextColour(85f).StartsWith("0.54") && MapMath.MeterTextColour(20f).StartsWith("0.98"),
+            "bar colour ramp goes red to green");
     }
 
     // ------------------------------------------------------------------------------------------------ the captions

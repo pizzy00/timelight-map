@@ -97,7 +97,13 @@ namespace TimeLightMap
                 new HarmonyMethod(typeof(Commands), nameof(Commands.ExecutePrefix)), null, null, null));
 
             // The picture: the frame's light from the main terrain draw, the drawing after the world frame.
-            Try("TerrainRenderer.Draw + GameHost.DrawFrame (the map picture)", TopCamPatches.Apply(harmony));
+            bool topCamOk = false;
+            Try("TerrainRenderer.Draw + GameHost.DrawFrame (the map picture)", () =>
+            {
+                TopCamPatches.Apply(harmony)();
+                topCamOk = true;
+            });
+            Embedding.SetRendererReady(topCamOk);
 
             // The map's texts (names, places, scale, N) are HUD text boxes, added where the game adds its speech bubbles;
             // the same postfix keeps the bubbles themselves off the map rectangle.

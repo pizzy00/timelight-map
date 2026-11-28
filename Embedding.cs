@@ -1,3 +1,7 @@
+// TimeLight Map: an in-game 3D picture-in-picture map for MeitouClient.
+// Copyright (C) 2026 TimeLight Map contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+#nullable enable
 using System;
 using System.Numerics;
 using Meitou.Game.Rendering.Gpu;

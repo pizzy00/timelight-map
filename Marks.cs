@@ -155,7 +155,7 @@ namespace TimeLightMap
         public const float ConeMinPx = 30f;     // the shortest view cone on the map, pixels
         public const float ArrowReach = 10f;    // a heading arrow's tip stands this far out from the edge of the dot
         // text styles
-        const byte StyleName = 0, StyleLeader = 1, StylePlace = 2, StyleChrome = 3, StyleTrader = 4;
+        const byte StyleName = 0, StyleLeader = 1, StylePlace = 2, StyleChrome = 3, StyleTrader = 4, StyleFoe = 5;
 
         public const string Font = "Kenshi_StandardFont_Medium";
 
@@ -165,6 +165,10 @@ namespace TimeLightMap
         public static int LastGamePlaces;
         public static string TradersError;              // a failure there switches off only the traders layer
         public static int LastTraders;
+        public static FoeLabelMode FoeLabels = FoeLabelMode.Auto;
+        public static int LastFoeLabels;
+        public static bool ShowSquadBars, ShowClock, ShowCats, ShowSpeed;
+        public static string HudError;
         public static string Error;
         public static float TextScale = 1f;
         public static int Layers = MapLayers.All;      // topcam layer <name> on|off
@@ -241,12 +245,23 @@ namespace TimeLightMap
         static readonly UiRect[] _controlClip = new UiRect[MaxText];
         static readonly string[] Names = MakeNames();
         static readonly Dictionary<string, string>[][] StylesByAlpha = new Dictionary<string, string>[101][];
+        static readonly Dictionary<string, string> EmptyProps = new Dictionary<string, string>();
+        static readonly Dictionary<(int Alpha, string Colour, string Align), Dictionary<string, string>> BarStyles =
+            new Dictionary<(int, string, string), Dictionary<string, string>>();
         static TerrainRenderer _terrain;
         static byte _alpha = 100;
         static bool _round;                 // this frame's map is round: texts stay inside its circle
         static float _rw, _rh, _radius;
 
-        /// <summary>The text styles at an alpha (hundredths): name, leader, place, scale and N, moving trader.</summary>
+        struct SquadBarsState
+        {
+            public bool Active, HasOrganic;
+            public float HpPct, FedPct, RawHunger, RawHudFed;
+            public int DownCount, MemberCount;
+        }
+        static SquadBarsState _bars;
+
+        /// <summary>The text styles at an alpha (hundredths): name, leader, place, scale and N, moving trader, hostile group.</summary>
         static Dictionary<string, string>[] StylesAt(int alpha)
         {
             alpha = Math.Clamp(alpha, 0, 100);
@@ -257,11 +272,25 @@ namespace TimeLightMap
                 Style("1 0.93 0.68", "Center", alpha),
                 Style("1 1 1", "Center", alpha),
                 Style("0.45 1 0.72", "Center", alpha),
+                Style("1 0.44 0.38", "Center", alpha),
             };
         }
 
+        static Dictionary<string, string> BarStyle(string colour, string align, int alpha)
+        {
+            alpha = Math.Clamp(alpha, 0, 100);
+            var key = (alpha, colour, align);
+            if (BarStyles.TryGetValue(key, out var s)) return s;
+            if (BarStyles.Count > 256) BarStyles.Clear();
+            return BarStyles[key] = Style(colour, align, alpha);
+        }
+
         static readonly LabelLayout Layout = new LabelLayout();
-        static readonly PlaceLayout PlaceSpots = new PlaceLayout();      // where the place & trader labels' texts go (round your people)
+        static readonly PlaceLayout PlaceSpots = new PlaceLayout();      // where the place, trader and foe labels' texts go (round your people)
+        static readonly FoeClusterer FoeGroups = new FoeClusterer();
+        static readonly float[] _foeX = new float[MaxHostiles], _foeY = new float[MaxHostiles];
+        static readonly bool[] _foeFight = new bool[MaxHostiles];
+        static int _foeCount;
         static readonly RoutePlan Route = new RoutePlan();
         static readonly string[] _placeText = new string[PlaceLayout.Max];
         static readonly byte[] _placeStyle = new byte[PlaceLayout.Max];
@@ -352,12 +381,17 @@ namespace TimeLightMap
                     if (MapLayers.On(lay, MapLayers.Route) && _waypoints != null && WaypointError == null) WaypointLayer(v, rw, rh);
                     if (MapLayers.On(lay, MapLayers.Scale)) ScaleBar(v, rw, rh);
                     if (MapLayers.On(lay, MapLayers.North)) North(v, rw, rh);
+                    if (ShowClock || ShowCats || ShowSpeed) HudInfoLayer(host, rw, rh, lay);
+                    if (MapLayers.On(lay, MapLayers.Foes)) FoesCollect(host, v, rw, rh);
+                    else { _foeCount = 0; LastHostiles = 0; LastFoeLabels = 0; FoeGroups.Clear(); }
                     Places(host, v, rw, rh, lay, gameSeconds);
-                    if (MapLayers.On(lay, MapLayers.Foes)) Foes(host, v, rw, rh);
-                    else LastHostiles = 0;
+                    if (MapLayers.On(lay, MapLayers.Foes)) FoesDraw();
                     _limit = MaxShapes;
                     PeopleDraw(v, rw, rh);
+                    if (ShowSquadBars) ReadSquadBarsLayer(host);
+                    else _bars.Active = false;
                 }
+                else _bars.Active = false;
                 // whole window pixels: sharp text, and a still picture gives the same controls every frame (the painter replays them)
                 for (int i = 0; i < _backCount; i++)
                 {
@@ -424,15 +458,39 @@ namespace TimeLightMap
         }
 
         /// <summary>Where the scale bar starts and stands: the bottom left; on a round map the bottom middle (bar and text
-        /// centred together).</summary>
+        /// centred together, nudged up slightly when Game speed sits underneath it).</summary>
         static void ScaleSpot(float rw, float rh, float len, float textW, out float x0, out float y)
         {
             if (_round)
             {
-                (x0, y) = (rw * 0.5f - (len + 7f + textW) * 0.5f, rh * 0.5f + _radius * 0.80f);
+                float frac = ShowSpeed ? 0.74f : 0.80f;
+                (x0, y) = (rw * 0.5f - (len + 7f + textW) * 0.5f, rh * 0.5f + _radius * frac);
                 return;
             }
             (x0, y) = (12f, rh - 13f);
+        }
+
+        /// <summary>Reserves the bottom chrome band (scale bar, optional clock/cats/speed) in both squad and place layouts.</summary>
+        static void AddBottomChromeObstacle(Action<float, float, float, float> add, float rw, float rh, int lay)
+        {
+            bool scale = MapLayers.On(lay, MapLayers.Scale);
+            bool info = ShowClock || ShowCats;
+            if (_round)
+            {
+                if (!scale && !info && !ShowSpeed) return;
+                float frac = ShowSpeed ? 0.74f : 0.80f;
+                float topY = rh * 0.5f + _radius * frac - 20f;
+                if (info) topY -= _lineGuess + 6f;
+                add(rw * 0.12f, topY, rw * 0.88f, rh);
+                return;
+            }
+            if (scale || info)
+            {
+                float topY = info ? rh - (scale ? 34f : 12f) - _lineGuess - 6f : rh - 34f;
+                float maxX = info ? rw * 0.84f : rw * 0.42f;
+                add(0f, topY, maxX, rh);
+            }
+            if (ShowSpeed) add(rw * 0.64f, rh - 34f, rw, rh);
         }
 
         /// <summary>Where the N arrow stands and points: the top right; on a round map on the rim, 40 degrees right of the top.
@@ -500,6 +558,232 @@ namespace TimeLightMap
             Text("N", tx, ty, tw, th, StyleChrome);
         }
 
+        /// <summary>Optional show-style map widgets: Day &amp; Clock, Cats, and Game Speed. Never breaks other marks.</summary>
+        static void HudInfoLayer(GameHost host, float rw, float rh, int lay)
+        {
+            try
+            {
+                HudInfo(host, rw, rh, lay);
+            }
+            catch (Exception e)
+            {
+                HudError = e.GetType().Name + ": " + e.Message;
+                ShowClock = ShowCats = ShowSpeed = false;
+                Log.Error("topcam: map HUD info (clock/cats/speed) switched off after an error (the other marks stay): " + e);
+            }
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static void HudInfo(GameHost host, float rw, float rh, int lay)
+        {
+            var session = host.Session;
+            var world = session?.World;
+            bool scaleOn = MapLayers.On(lay, MapLayers.Scale);
+            float scaleY = _round ? rh * 0.5f + _radius * (ShowSpeed ? 0.74f : 0.80f) : rh - 13f;
+
+            if (ShowClock || ShowCats)
+            {
+                string clockLong = "", clockShort = "";
+                if (ShowClock)
+                {
+                    if (session?.Clock is { } gc)
+                    {
+                        clockLong = MapMath.FormatClock(gc.Day, gc.Hour, gc.Minute, includeTimeWord: true);
+                        clockShort = MapMath.FormatClock(gc.Day, gc.Hour, gc.Minute, includeTimeWord: false);
+                    }
+                    else if (world != null)
+                    {
+                        clockLong = MapMath.FormatClock(world.GameHours, includeTimeWord: true);
+                        clockShort = MapMath.FormatClock(world.GameHours, includeTimeWord: false);
+                    }
+                }
+                string catsText = ShowCats && world?.Player != null ? MapMath.FormatCats(world.Player.Money) : "";
+                string line = (!string.IsNullOrEmpty(clockLong) && !string.IsNullOrEmpty(catsText))
+                    ? clockLong + "  " + catsText
+                    : !string.IsNullOrEmpty(clockLong) ? clockLong : catsText;
+                if (!string.IsNullOrEmpty(line))
+                {
+                    Size(line, out float tw, out float th);
+                    tw += 14f;
+                    float ty = scaleOn ? scaleY - th - 10f : (_round ? scaleY - th * 0.5f : rh - th - 6f);
+                    float tx = _round ? rw * 0.5f - tw * 0.5f : 12f;
+                    // On narrow round maps, drop the word "TIME" if the combined Day + Time + Cats pill would clip the rim.
+                    if (_round && !Fits(tx, ty, tw, th) && !string.IsNullOrEmpty(clockShort))
+                    {
+                        string compact = !string.IsNullOrEmpty(catsText) ? clockShort + "  " + catsText : clockShort;
+                        Size(compact, out float cw, out float ch);
+                        cw += 14f;
+                        float cx = rw * 0.5f - cw * 0.5f;
+                        if (Fits(cx, ty, cw, ch)) (line, tx, tw, th) = (compact, cx, cw, ch);
+                    }
+                    if (Fits(tx, ty, tw, th))
+                    {
+                        Backing(tx, ty, tw, th);
+                        Text(line, tx, ty, tw, th, StyleChrome);
+                    }
+                }
+            }
+
+            if (ShowSpeed && session?.Simulation is { } sim)
+            {
+                string sp = MapMath.FormatSpeed(sim.IsPaused, sim.Speed);
+                if (!string.IsNullOrEmpty(sp))
+                {
+                    Size(sp, out float sw, out float sh);
+                    sw += 10f;
+                    float sx = _round ? rw * 0.5f - sw * 0.5f : rw - 12f - sw;
+                    float sy = _round ? scaleY + (scaleOn ? 8f : -sh * 0.5f) : rh - 13f - sh * 0.5f - 2f;
+                    if (Fits(sx, sy, sw, sh))
+                    {
+                        Backing(sx, sy, sw, sh);
+                        Text(sp, sx, sy, sw, sh, StyleChrome);
+                    }
+                }
+            }
+        }
+
+        /// <summary>Computes the active squad's average HP %, Down count, and organic Fed % for the docked bar panel.</summary>
+        static void ReadSquadBarsLayer(GameHost host)
+        {
+            try
+            {
+                ReadSquadBars(host);
+            }
+            catch (Exception e)
+            {
+                HudError = e.GetType().Name + ": " + e.Message;
+                ShowSquadBars = false;
+                _bars.Active = false;
+                Log.Error("topcam: Squad HP & Fed bars switched off after an error (the other marks stay): " + e);
+            }
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static void ReadSquadBars(GameHost host)
+        {
+            int count = Pack.Squad > 0 ? Pack.Squad : Pack.Count;
+            if (count <= 0)
+            {
+                _bars.Active = false;
+                return;
+            }
+            var chars = host?.Session?.World?.Characters;
+            float hpSum = 0f, fedSum = 0f;
+            float firstHunger = float.NaN, firstHudFed = float.NaN;
+            int hpCount = 0, fedCount = 0, down = 0;
+            for (int i = 0; i < count; i++)
+            {
+                var c = Pack.Who[i];
+                if (c == null) continue;
+                var body = c.Body;
+                if (body is { Unconscious: true } or { Coma: true }) down++;
+
+                // Prefer full limb HP from World.Characters.Cold(id).Medical.Parts (available for every squad member,
+                // not only the currently selected one), falling back to CharacterSnapshot.HealthParts -> BodyStatus.
+                float memberHp = -1f;
+                bool isRobot = c.Hud is { Robot: true };
+                float hunger = body is { } bh ? bh.Hunger : float.NaN;
+                if (chars != null)
+                {
+                    try
+                    {
+                        if (chars.IsAlive(c.Id))
+                        {
+                            var cold = chars.Cold(c.Id.Slot);
+                            var med = cold?.Medical;
+                            if (med != null)
+                            {
+                                var medParts = med.Parts;
+                                if (medParts != null && medParts.Count > 0)
+                                {
+                                    float cur = 0f, max = 0f;
+                                    for (int p = 0; p < medParts.Count; p++)
+                                    {
+                                        var part = medParts[p];
+                                        if (part == null || !(part.MaxHp > 0f) || !float.IsFinite(part.MaxHp)) continue;
+                                        float fl = float.IsFinite(part.Flesh) ? MathF.Min(part.Flesh, part.MaxHp) : 0f;
+                                        cur += fl;
+                                        max += part.MaxHp;
+                                    }
+                                    if (max > 0f) memberHp = Math.Clamp(cur / max * 100f, 0f, 100f);
+                                }
+                                if (!float.IsFinite(hunger) && float.IsFinite(med.Hunger)) hunger = med.Hunger;
+                            }
+                            if (!isRobot && cold?.Race != null)
+                            {
+                                string rname = cold.Race.Name;
+                                if (!string.IsNullOrEmpty(rname) && rname.IndexOf("skeleton", StringComparison.OrdinalIgnoreCase) >= 0)
+                                    isRobot = true;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                if (memberHp < 0f)
+                {
+                    var parts = c.HealthParts;
+                    if (parts != null && parts.Count > 0)
+                    {
+                        float cur = 0f, max = 0f;
+                        for (int p = 0; p < parts.Count; p++)
+                        {
+                            var part = parts[p];
+                            if (!(part.Maximum > 0f) || !float.IsFinite(part.Maximum)) continue;
+                            float fl = float.IsFinite(part.Flesh) ? MathF.Min(part.Flesh, part.Maximum) : 0f;
+                            cur += fl;
+                            max += part.Maximum;
+                        }
+                        if (max > 0f) memberHp = Math.Clamp(cur / max * 100f, 0f, 100f);
+                    }
+                }
+                if (memberHp < 0f)
+                {
+                    if (body is { } b)
+                    {
+                        float b1 = float.IsFinite(b.Blood) ? b.Blood : 1f;
+                        float b2 = float.IsFinite(b.WorstPart) ? b.WorstPart : 1f;
+                        memberHp = Math.Clamp(MathF.Min(b1, b2), 0f, 1f) * 100f;
+                    }
+                    else memberHp = 100f;
+                }
+                hpSum += memberHp;
+                hpCount++;
+
+                if (!isRobot)
+                {
+                    var hud = c.Hud;
+                    float hudFed = hud is { } hv ? hv.Fed : float.NaN;
+                    if (!float.IsFinite(firstHunger) && float.IsFinite(hunger)) firstHunger = hunger;
+                    if (!float.IsFinite(firstHudFed) && float.IsFinite(hudFed)) firstHudFed = hudFed;
+                    float pct = MapMath.FedPercent(hunger);
+                    if (pct < 0f && float.IsFinite(hudFed))
+                        pct = hudFed <= 1.05f ? Math.Clamp(hudFed * 100f, 0f, 100f) : MapMath.FedPercent(hudFed);
+                    if (pct >= 0f)
+                    {
+                        fedSum += pct;
+                        fedCount++;
+                    }
+                }
+            }
+            if (hpCount == 0)
+            {
+                _bars.Active = false;
+                return;
+            }
+            _bars = new SquadBarsState
+            {
+                Active = true,
+                MemberCount = hpCount,
+                DownCount = down,
+                HpPct = Math.Clamp(hpSum / hpCount, 0f, 100f),
+                HasOrganic = fedCount > 0,
+                FedPct = fedCount > 0 ? Math.Clamp(fedSum / fedCount, 0f, 100f) : 100f,
+                RawHunger = firstHunger,
+                RawHudFed = firstHudFed,
+            };
+        }
+
         /// <summary>The place labels ("towns") and moving trade caravans ("traders"): discovered towns/places as cream
         /// diamonds, roaming trade caravans as emerald ringed diamonds (with heading arrows while moving). All texts are laid
         /// out together by PlaceLayout round your people's names, dots and leader lines, the scale bar, the N, each other and
@@ -530,11 +814,7 @@ namespace TimeLightMap
                             pl.AddLineObstacle(layout.DotX[j] + dx / len * from, layout.DotY[j] + dy / len * from, layout.LeadX[j], layout.LeadY[j]);
                     }
                 }
-            if (MapLayers.On(lay, MapLayers.Scale))
-            {
-                if (_round) pl.AddObstacle(rw * 0.15f, rh * 0.5f + _radius * 0.80f - 20f, rw * 0.85f, rh);
-                else pl.AddObstacle(0f, rh - 34f, rw * 0.42f, rh);
-            }
+            AddBottomChromeObstacle(pl.AddObstacle, rw, rh, lay);
             if (MapLayers.On(lay, MapLayers.North))
             {
                 NorthSpot(v, rw, rh, out float nx, out float ny, out _, out _);
@@ -544,6 +824,8 @@ namespace TimeLightMap
             if (n == 0) LastGamePlaces = 0;
             if (MapLayers.On(lay, MapLayers.Traders)) TradersLayer(host, v, rw, rh, gameSeconds, MapLayers.On(lay, MapLayers.Arrows), ref n);
             else LastTraders = 0;
+            if (MapLayers.On(lay, MapLayers.Foes) && FoeLabels != FoeLabelMode.Off) AddFoeLabels(ref n);
+            else LastFoeLabels = 0;
             pl.Count = n;
             pl.Solve(rw, rh);
             int shown = 0;
@@ -813,11 +1095,22 @@ namespace TimeLightMap
             Shape(Line, x + inset, cy, x + w - inset, cy, thick, PalBack, 0f);
         }
 
-        /// <summary>A red dot on every character the game counts as hostile to the player or fighting the player, awake
-        /// and alive, on the picture. Characters actively fighting the player are placed first so large crowds never hide them.</summary>
-        static void Foes(GameHost host, in MapView v, float rw, float rh)
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static string ReadFactionName(GameHost host, int factionId)
+        {
+            var factions = host.PopData?.Factions;
+            if (factions == null || factionId < 0 || factionId >= factions.Count) return null;
+            return factions[factionId]?.Name;
+        }
+
+        /// <summary>Collects every visible character hostile to or fighting the player (active fighters first so large
+        /// crowds never hide attackers) and feeds FoeGroups so clustered red faction/type labels can be laid out with
+        /// Places before FoesDraw renders the red dots on top.</summary>
+        static void FoesCollect(GameHost host, in MapView v, float rw, float rh)
         {
             int drawn = 0;
+            FoeGroups.Clear();
+            bool wantLabels = FoeLabels != FoeLabelMode.Off;
             var all = host.Session?.CurrentSnapshot?.Characters;
             if (all != null)
             {
@@ -838,12 +1131,55 @@ namespace TimeLightMap
                         if (!float.IsFinite(at.X) || !float.IsFinite(at.Z)) continue;
                         v.ToPixel(at.X, float.IsFinite(at.Y) ? at.Y : Ground(v, at.X, at.Z), at.Z, rw, rh, out px, out py);
                         if (!Inside(px, py, rw, rh, -5f)) continue;
-                        Shape(Disc, px, py, 4.5f, 0f, 0f, PalHostile, 0f);
+                        _foeX[drawn] = px;
+                        _foeY[drawn] = py;
+                        _foeFight[drawn] = c.FightsPlayer;
+                        if (wantLabels)
+                        {
+                            string fname = null;
+                            try { fname = ReadFactionName(host, c.Faction); } catch { }
+                            FoeGroups.Add(px, py, c.Faction, fname, c.Name, c.FightsPlayer);
+                        }
                         drawn++;
                     }
                 }
             }
+            _foeCount = drawn;
             LastHostiles = drawn;
+        }
+
+        static void AddFoeLabels(ref int labelCount)
+        {
+            FoeGroups.Build(FoeLabels);
+            int added = 0;
+            var pl = PlaceSpots;
+            for (int i = 0; i < FoeGroups.ClusterCount && labelCount < PlaceLayout.Max; i++)
+            {
+                string raw = FoeGroups.Label[i];
+                if (string.IsNullOrEmpty(raw)) continue;
+                if (!PlaceCaptions.TryGetValue(raw, out string caption))
+                {
+                    if (PlaceCaptions.Count > 512) PlaceCaptions.Clear();
+                    PlaceCaptions[raw] = caption = CaptionText.Escape(raw);
+                }
+                Size(caption, out float tw, out float th);
+                float cx = FoeGroups.CX[i], cy = FoeGroups.CY[i];
+                pl.AddObstacle(cx - 6f, cy - 6f, cx + 6f, cy + 6f);
+                pl.Key[labelCount] = FoeGroups.Key[i];
+                (pl.AnchorX[labelCount], pl.AnchorY[labelCount], pl.Above[labelCount], pl.W[labelCount], pl.H[labelCount], pl.Priority[labelCount]) =
+                    (cx, cy, 9f, tw, th, FoeGroups.Fighting[i] ? 3 : 1);
+                _placeText[labelCount] = caption;
+                _placeStyle[labelCount] = StyleFoe;
+                labelCount++;
+                added++;
+            }
+            LastFoeLabels = added;
+        }
+
+        static void FoesDraw()
+        {
+            for (int i = _foeCount - 1; i >= 0; i--)
+                Shape(Disc, _foeX[i], _foeY[i], _foeFight[i] ? 5.0f : 4.3f, 0f, 0f, PalHostile, 0f);
         }
 
         /// <summary>The main camera's view cone (ViewCone), under everything else: a fan of triangles from the eye's ground
@@ -1132,11 +1468,7 @@ namespace TimeLightMap
             _people = k;
             layout.CircleR = _round ? _radius : 0f;
             layout.ClearObstacles();
-            if (MapLayers.On(lay, MapLayers.Scale))
-            {
-                if (_round) layout.AddObstacle(rw * 0.15f, rh * 0.5f + _radius * 0.80f - 20f, rw * 0.85f, rh);
-                else layout.AddObstacle(0f, rh - 34f, rw * 0.42f, rh);
-            }
+            AddBottomChromeObstacle(layout.AddObstacle, rw, rh, lay);
             if (MapLayers.On(lay, MapLayers.North))
             {
                 NorthSpot(v, rw, rh, out float nx, out float ny, out _, out _);
@@ -1253,7 +1585,8 @@ namespace TimeLightMap
                         if (!Sizes.TryGetValue(t.Text, out var size))
                         {
                             var measured = painter.WrapCaption(Font, t.Text, TextScale, 100000f, minimum).Size;
-                            size = new Vector2(MathF.Ceiling(measured.Width) + 4f, MathF.Ceiling(measured.Height) + 2f);
+                            float pad = t.Text.IndexOf('#') >= 0 ? 14f : 4f;
+                            size = new Vector2(MathF.Ceiling(measured.Width) + pad, MathF.Ceiling(measured.Height) + 2f);
                             Sizes[t.Text] = size;
                             if (size.Y > 4f) _lineGuess = size.Y;
                         }
@@ -1273,12 +1606,104 @@ namespace TimeLightMap
                         }
                         controls.Add(c);
                     }
+                    if (ShowSquadBars && _bars.Active && _alpha > 0)
+                        AddSquadBarControls(controls, _alpha / 100f, player.Width, player.Height);
                 }
             }
             catch (Exception e)
             {
                 Fail("labels", e);
             }
+        }
+
+        /// <summary>Emits the docked Squad HP and Squad Fed bar card directly below (or above) the minimap.</summary>
+        static void AddSquadBarControls(List<UiControl> controls, float alpha, float winW, float winH)
+        {
+            if (!(winW > 64f) || !(winH > 64f)) return;
+            int aByte = Math.Clamp((int)MathF.Round(alpha * 100f), 0, 100);
+            float rowH = MathF.Max(18f, MathF.Round(_lineGuess * 0.94f));
+            float padX = 10f, padY = 6f, rowGap = 4f;
+            bool showDown = _bars.DownCount > 0;
+            float downH = showDown ? MathF.Max(16f, MathF.Round(rowH * 0.86f)) : 0f;
+            float panelW = MathF.Round(Math.Clamp(_clipW * 0.90f, 240f, MathF.Max(260f, _clipW)));
+            if (panelW > winW - 8f) panelW = MathF.Max(180f, winW - 8f);
+            float panelH = padY * 2f + rowH * 2f + rowGap + (showDown ? rowGap + downH : 0f);
+
+            float px = MathF.Round(Math.Clamp(_clipX + (_clipW - panelW) * 0.5f, 4f, MathF.Max(4f, winW - panelW - 4f)));
+            float pyBelow = MathF.Round(_clipY + _clipH + 8f);
+            float pyAbove = MathF.Round(_clipY - panelH - 8f);
+            float py = (pyBelow + panelH <= winH - 4f || pyAbove < 4f)
+                ? MathF.Min(pyBelow, MathF.Max(4f, winH - panelH - 4f))
+                : pyAbove;
+
+            // Subtle outer border and dark translucent card
+            controls.Add(new UiControl("topcam-sb-border", "Widget", new UiRect(px - 1f, py - 1f, panelW + 2f, panelH + 2f),
+                "", "", "", true, EmptyProps, new Vector4(0.36f, 0.32f, 0.24f, 0.55f * alpha), Pickable: false));
+            controls.Add(new UiControl("topcam-sb-bg", "Widget", new UiRect(px, py, panelW, panelH),
+                "", "", "", true, EmptyProps, new Vector4(0.05f, 0.05f, 0.07f, 0.86f * alpha), Pickable: false));
+
+            float labelW = MathF.Round(Math.Clamp(panelW * 0.31f, 70f, 96f));
+            float valW = MathF.Round(Math.Clamp(panelW * 0.18f, 40f, 58f));
+            float trackX = px + padX + labelW + 6f;
+            float trackW = MathF.Max(48f, panelW - padX * 2f - labelW - valW - 12f);
+            float trackH = MathF.Max(8f, MathF.Round(rowH * 0.54f));
+
+            AddMeterRow(controls, "hp", "SQUAD HP", _bars.HpPct,
+                MathF.Round(_bars.HpPct).ToString("0", Ci) + "%", MapMath.MeterTextColour(_bars.HpPct),
+                px + padX, py + padY, labelW, trackX, trackW, trackH, valW, rowH, alpha, aByte);
+
+            string fedVal = _bars.HasOrganic ? MathF.Round(_bars.FedPct).ToString("0", Ci) + "%" : "ROBOTS";
+            string fedCol = _bars.HasOrganic ? MapMath.MeterTextColour(_bars.FedPct) : "0.68 0.78 0.92";
+            AddMeterRow(controls, "fed", "SQUAD FED", _bars.HasOrganic ? _bars.FedPct : 100f,
+                fedVal, fedCol,
+                px + padX, py + padY + rowH + rowGap, labelW, trackX, trackW, trackH, valW, rowH, alpha, aByte);
+
+            if (showDown)
+            {
+                float dy = py + padY + rowH * 2f + rowGap * 2f;
+                controls.Add(new UiControl("topcam-sb-downbg", "Widget", new UiRect(px + padX, dy, panelW - padX * 2f, downH),
+                    "", "", "", true, EmptyProps, new Vector4(0.36f, 0.07f, 0.07f, 0.85f * alpha), Pickable: false));
+                string downText = _bars.DownCount.ToString(Ci) + " DOWN";
+                controls.Add(new UiControl("topcam-sb-downtxt", "TextBox", new UiRect(px + padX, dy, panelW - padX * 2f, downH),
+                    downText, "", "", true, BarStyle("1 0.42 0.36", "Center", aByte), Vector4.Zero, Pickable: false, TextScale: TextScale));
+            }
+        }
+
+        static void AddMeterRow(List<UiControl> controls, string id, string label, float pct, string valText, string textColour,
+            float labelX, float rowY, float labelW, float trackX, float trackW, float trackH, float valW, float rowH, float alpha, int aByte)
+        {
+            controls.Add(new UiControl("topcam-sb-" + id + "-lbl", "TextBox", new UiRect(labelX, rowY, labelW, rowH),
+                label, "", "", true, BarStyle(textColour, "Left", aByte), Vector4.Zero, Pickable: false, TextScale: TextScale));
+
+            float ty = rowY + MathF.Round((rowH - trackH) * 0.5f);
+            controls.Add(new UiControl("topcam-sb-" + id + "-trk", "Widget", new UiRect(trackX, ty, trackW, trackH),
+                "", "", "", true, EmptyProps, new Vector4(0.11f, 0.14f, 0.11f, 0.92f * alpha), Pickable: false));
+
+            float fillW = Math.Clamp(pct, 0f, 100f) / 100f * trackW;
+            if (fillW >= 1f)
+            {
+                const int slices = 8;
+                float sliceW = trackW / slices;
+                for (int s = 0; s < slices; s++)
+                {
+                    float x0 = s * sliceW;
+                    if (x0 >= fillW) break;
+                    float x1 = MathF.Min((s + 1) * sliceW, fillW);
+                    float w = MathF.Ceiling(x1) - MathF.Floor(x0);
+                    if (w < 1f) w = 1f;
+                    MapMath.BarRampRgb((s + 0.5f) / slices, out float r, out float g, out float b);
+                    controls.Add(new UiControl("topcam-sb-" + id + "-f" + s, "Widget", new UiRect(trackX + MathF.Floor(x0), ty, w, trackH),
+                        "", "", "", true, EmptyProps, new Vector4(r, g, b, 0.96f * alpha), Pickable: false));
+                }
+                if (fillW < trackW - 1f)
+                {
+                    controls.Add(new UiControl("topcam-sb-" + id + "-cap", "Widget", new UiRect(trackX + MathF.Round(fillW) - 1f, ty, 2f, trackH),
+                        "", "", "", true, EmptyProps, new Vector4(0.96f, 0.98f, 0.96f, 0.95f * alpha), Pickable: false));
+                }
+            }
+
+            controls.Add(new UiControl("topcam-sb-" + id + "-val", "TextBox", new UiRect(trackX + trackW + 6f, rowY, valW, rowH),
+                valText, "", "", true, BarStyle(textColour, "Right", aByte), Vector4.Zero, Pickable: false, TextScale: TextScale));
         }
 
         // =====================================================================================================
@@ -1302,7 +1727,7 @@ namespace TimeLightMap
                 Palette[(int)PalConeFill * 4 + 3] = 0.18f;
                 PaletteVersion++;
             }
-            PlacesError = TradersError = ConeError = ArrowError = RouteError = WaypointError = null;
+            PlacesError = TradersError = ConeError = ArrowError = RouteError = WaypointError = HudError = null;
             Walk.Clear();
             TraderWalk.Clear();
             Layout.Forget();
@@ -1389,6 +1814,54 @@ namespace TimeLightMap
                     // the same switch as 'topcam layer foes'
                     if (a.Count != 2 || !MapPrefs.OnOff(a[1], out bool on)) return "usage: topcam hostiles on|off   (the red dots of characters hostile to you; = topcam layer foes)";
                     SetLayer(MapLayers.Foes, on);
+                    return "";
+                }
+                case "foelabels":
+                case "hostilelabels":
+                case "enemylabels":
+                {
+                    if (a.Count != 2 || !MapPrefs.FoeLabels(a[1], out var mode))
+                        return "usage: topcam foelabels auto|on|off   (auto: labels enemies attacking your squad; on: all visible hostiles; off: red dots only)";
+                    FoeLabels = mode;
+                    return "";
+                }
+                case "squadbars":
+                case "bars":
+                case "squadstats":
+                case "meters":
+                {
+                    if (a.Count != 2 || !MapPrefs.OnOff(a[1], out bool on))
+                        return "usage: topcam squadbars on|off   (docked Squad HP and Squad Fed bars beside the map)";
+                    ShowSquadBars = on;
+                    if (on) HudError = null;
+                    else _bars.Active = false;
+                    return "";
+                }
+                case "clock":
+                case "time":
+                {
+                    if (a.Count != 2 || !MapPrefs.OnOff(a[1], out bool on))
+                        return "usage: topcam clock on|off   (in-game day and clock time on the map)";
+                    ShowClock = on;
+                    if (on) HudError = null;
+                    return "";
+                }
+                case "cats":
+                case "money":
+                {
+                    if (a.Count != 2 || !MapPrefs.OnOff(a[1], out bool on))
+                        return "usage: topcam cats on|off   (your Cats on the map)";
+                    ShowCats = on;
+                    if (on) HudError = null;
+                    return "";
+                }
+                case "speed":
+                case "gamespeed":
+                {
+                    if (a.Count != 2 || !MapPrefs.OnOff(a[1], out bool on))
+                        return "usage: topcam speed on|off   (game speed or PAUSED on the map)";
+                    ShowSpeed = on;
+                    if (on) HudError = null;
                     return "";
                 }
                 case "traders":
@@ -1491,6 +1964,19 @@ namespace TimeLightMap
             sb.Append(",\"routes\":{\"drawn\":").Append(LastRoutes).Append(",\"same\":").Append(LastRoutesSkipped)
               .Append(",\"error\":").Append(MapMath.JsonText(RouteError)).Append('}');
             sb.Append(",\"hurt\":").Append(LastHurt);
+            sb.Append(",\"foeLabels\":{\"mode\":").Append(MapMath.JsonText(MapPrefs.FoeLabelsWord(FoeLabels))).Append(",\"shown\":").Append(LastFoeLabels).Append('}');
+            sb.Append(",\"hud\":{\"squadBars\":").Append(ShowSquadBars ? "true" : "false")
+              .Append(",\"clock\":").Append(ShowClock ? "true" : "false")
+              .Append(",\"cats\":").Append(ShowCats ? "true" : "false")
+              .Append(",\"speed\":").Append(ShowSpeed ? "true" : "false");
+            if (_bars.Active)
+                sb.Append(",\"hp\":").Append(MapMath.Num(_bars.HpPct, "0.#"))
+                  .Append(",\"fed\":").Append(MapMath.Num(_bars.FedPct, "0.#"))
+                  .Append(",\"down\":").Append(_bars.DownCount)
+                  .Append(",\"organic\":").Append(_bars.HasOrganic ? "true" : "false")
+                  .Append(",\"rawHunger\":").Append(MapMath.Num(_bars.RawHunger, "0.###"))
+                  .Append(",\"rawHudFed\":").Append(MapMath.Num(_bars.RawHudFed, "0.###"));
+            sb.Append(",\"error\":").Append(MapMath.JsonText(HudError)).Append('}');
             sb.Append(",\"error\":").Append(MapMath.JsonText(Error)).Append('}');
         }
     }

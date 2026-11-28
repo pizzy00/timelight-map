@@ -81,6 +81,26 @@ namespace TimeLightMap
 
         public static string OnOffWord(bool on) => on ? "on" : "off";
 
+        /// <summary>Hostile faction/type label mode: auto (attackers only), on (all visible hostiles), off (red dots only).</summary>
+        public static bool FoeLabels(string word, out FoeLabelMode mode)
+        {
+            switch ((word ?? "").Trim().ToLowerInvariant())
+            {
+                case "auto": case "smart": case "attackers": case "combat": mode = FoeLabelMode.Auto; return true;
+                case "on": case "all": case "true": case "1": case "yes": mode = FoeLabelMode.On; return true;
+                case "off": case "none": case "false": case "0": case "no": mode = FoeLabelMode.Off; return true;
+            }
+            mode = FoeLabelMode.Auto;
+            return false;
+        }
+
+        public static string FoeLabelsWord(FoeLabelMode mode) => mode switch
+        {
+            FoeLabelMode.Off => "off",
+            FoeLabelMode.On => "on",
+            _ => "auto",
+        };
+
         /// <summary>The map's shape: square (the window's own map shape, about 10:7) or round (a circle).</summary>
         public static bool Shape(string word, out bool round)
         {
@@ -323,6 +343,7 @@ namespace TimeLightMap
             new Opt("marks", "on", "everything drawn on the picture (all the marks below)"),
             new Opt("names", "on", "your people's names"),
             new Opt("hostiles", "on", "red dots on characters hostile to you"),
+            new Opt("foelabels", "auto", "auto (labels enemies attacking your squad) | on (all visible hostiles) | off (dots only)"),
             new Opt("traders", "on", "green markers on moving trade caravans"),
             new Opt("places", "on", "names of the towns and places you have discovered"),
             new Opt("cone", "on", "the dotted cone showing where the main camera looks"),
@@ -331,6 +352,10 @@ namespace TimeLightMap
             new Opt("hurt", "on", "an orange or red ring on anyone badly hurt"),
             new Opt("scale", "on", "the scale bar"),
             new Opt("north", "on", "the north arrow"),
+            new Opt("squadbars", "off", "on: docked Squad HP and Squad Fed bars beside the map"),
+            new Opt("clock", "off", "on: in-game day and clock time above the scale bar"),
+            new Opt("cats", "off", "on: your Cats (money) above the scale bar"),
+            new Opt("speed", "off", "on: game speed / paused indicator below the scale bar"),
             new Opt("textscale", "1", "the size of the names and labels (0.5..3)"),
             new Opt("hidewithui", "on", "on: the map hides while the game's interface is hidden (F7, hud hide); off: it stays"),
             new Opt("keys", "on", "the map's hotkeys below (a key you bind in the game's own settings wins over them)"),
@@ -356,6 +381,10 @@ namespace TimeLightMap
         {
             "towns" => "places",
             "foes" => "hostiles",
+            "hostilelabels" => "foelabels",
+            "enemylabels" => "foelabels",
+            "foelabel" => "foelabels",
+            "attackerlabels" => "foelabels",
             "trader" => "traders",
             "caravans" => "traders",
             "caravan" => "traders",
@@ -363,6 +392,17 @@ namespace TimeLightMap
             "merchant" => "traders",
             "route" => "routes",
             "waypoints" => "routes",
+            "bars" => "squadbars",
+            "squadstats" => "squadbars",
+            "meters" => "squadbars",
+            "crewmeters" => "squadbars",
+            "stats" => "squadbars",
+            "time" => "clock",
+            "day" => "clock",
+            "daytime" => "clock",
+            "money" => "cats",
+            "cash" => "cats",
+            "gamespeed" => "speed",
             string k => k,
         };
 

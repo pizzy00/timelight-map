@@ -1,4 +1,4 @@
-TimeLight Map 1.5.0
+TimeLight Map 1.6.0
 ===================
 
 A live 3D map in a corner of the game window, for MeitouClient.
@@ -10,11 +10,13 @@ rectangle in a corner of the screen (or a circle). It follows your squad and sho
     for someone out cold, a small arrow on anyone walking), your other squads as smaller grey-blue dots
   - where your selected people are walking: a dotted line to the end of their route
   - an orange ring on anyone hurt, a red one on anyone badly hurt
-  - characters hostile to you as red dots
+  - characters hostile to you as red dots, with smart faction/type labels on enemies attacking your squad
   - moving trade caravans as green ringed diamonds with their names and walk arrows
   - the names of the towns and places you have discovered
   - a dotted cone showing where the main camera is and which way it looks
   - a scale bar and a north arrow
+  - optional HUD widgets (off by default, toggleable in Settings > Mods > TimeLight Map): docked Squad HP & Fed bars,
+    Day & Clock time, Cats (money), and Game Speed / PAUSED indicator
 
 You set it up on the game's settings page (Settings > Mods > TimeLight Map), with four hotkeys while you play,
 in a small config file, or in the game's console.
@@ -51,7 +53,7 @@ INSTALL
      N shows and hides it, Shift+N makes it big, = and - zoom.
 
   The game's log output then has the line:
-         mod       timelight-map: TimeLight Map 1.5.0 ready: 8 patches, 0 failed; ...
+         mod       timelight-map: TimeLight Map 1.6.0 ready: 8 patches, 0 failed; ...
 
   To remove the mod: untick it, or delete the folder. The mod keeps no data in your saves. The game itself notes
   which code mods a save was made with and tells you once when that list has changed; the save loads either way.
@@ -63,7 +65,7 @@ THE FILE IS CALLED Meitou.Tests.dll. WHY?
 The map needs parts of the engine that MeitouClient 0.24 keeps internal (its renderer and its HUD). The engine lets
 exactly one assembly name see those parts: "Meitou.Tests", the name of its own test project. So the mod's DLL carries
 that name. It contains no tests and nothing of MeitouClient's; it is this mod's own code, and the source is in
-TimeLightMap-1.5.0-source.zip. What this means for you:
+TimeLightMap-1.6.0-source.zip. What this means for you:
 
   - The mod is tied to MeitouClient 0.24.x. Internal parts change without notice; a new MeitouClient release may need
     a new build of this mod. The mod declares the versions it accepts (">=0.24.0 <0.25.0"); outside them the game
@@ -141,6 +143,8 @@ game and type  topcam save file  to write the file from what you see.
   marks        on | off                                          on           everything drawn on the picture
   names        on | off                                          on           your people's names
   hostiles     on | off                                          on           red dots on characters hostile to you
+  foelabels    auto | on | off                                   auto         auto: labels enemies attacking your squad;
+                                                                              on: all visible hostiles; off: dots only
   traders      on | off                                          on           green markers and names on moving trade
                                                                               caravans (stationary shopkeepers excluded)
   places       on | off                                          on           names of discovered towns and places
@@ -150,6 +154,11 @@ game and type  topcam save file  to write the file from what you see.
   hurt         on | off                                          on           orange / red rings on hurt people
   scale        on | off                                          on           the scale bar
   north        on | off                                          on           the north arrow
+  squadbars    on | off                                          off          docked Squad HP and Squad Fed bars beside
+                                                                              the map (with a DOWN alert when hurt)
+  clock        on | off                                          off          in-game day and clock time on the map
+  cats         on | off                                          off          your Cats (money) on the map
+  speed        on | off                                          off          game speed or PAUSED on the map
   textscale    0.5..3                                            1            the size of names and labels
   hidewithui   on | off                                          on           on: the map hides while the game's interface
                                                                               is hidden (F7, or hud hide in the console)
@@ -225,6 +234,9 @@ Single kinds of mark (all on at first):
                                     route: where selected people walk hurt: the rings on hurt people
                                     scale: the scale bar              north: the N arrow
   topcam cone off                   the same as  topcam layer cone off  (also: places, hostiles, traders)
+  topcam foelabels auto             auto (attackers only) | on (all visible hostiles) | off (dots only)
+  topcam squadbars on               docked Squad HP & Fed bars beside the map;  topcam squadbars off
+  topcam clock on                   day and clock time on the map;  topcam cats on;  topcam speed on
   topcam waypoints x z [x z ...] --name text   draw a multi-point route on the map;  topcam waypoints clear
   topcam textscale 1.3              bigger names and labels (0.5..3)
   topcam cone reach 2 fill 0.25     how long the cone is (0.5..8) and how strong its inside is (0..1)
@@ -293,7 +305,7 @@ License as published by the Free Software Foundation, either version 3 of the Li
 version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
 warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The full text is in the file LICENSE.
 
-The complete source code is in TimeLightMap-1.5.0-source.zip, published together with this zip.
+The complete source code is in TimeLightMap-1.6.0-source.zip, published together with this zip.
 
 The mod is built against MeitouClient 0.24.0, which is licensed GPL-3.0-or-later, and patches it at run time with
 Harmony, which is licensed MIT. Both come with the game; neither is included here. No game data or assets are included.
@@ -302,6 +314,11 @@ Harmony, which is licensed MIT. Both come with the game; neither is included her
 VERSIONS
 --------
 
+1.6.0  Built for MeitouClient 0.24.0 (accepts 0.24.x; verified on 0.24.0 and 0.24.1). New: smart hostile faction/type
+       labels (foelabels = auto | on | off, automatically labeling clustered enemies attacking your squad, e.g.
+       "Dust Bandits x6", "Beak Thing x3"), plus optional show-style HUD widgets (all off by default, individually
+       toggleable in Settings > Mods > TimeLight Map): docked Squad HP & Fed bars (squadbars), Day & Clock (clock),
+       Cats (cats), and Game Speed / PAUSED (speed).
 1.5.0  Built for MeitouClient 0.24.0 (accepts 0.24.x; verified on 0.24.0 and 0.24.1). New: moving trade caravans shown
        as emerald-green ringed diamonds with walk arrows and non-overlapping green name labels (traders = on,
        Settings > Mods > Moving traders, topcam traders on|off; stationary town shopkeepers and hostile factions

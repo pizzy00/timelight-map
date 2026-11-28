@@ -205,6 +205,85 @@ namespace TimeLightMap
         public static string Num(double v, string format = "0.#") =>
             double.IsFinite(v) ? v.ToString(format, CultureInfo.InvariantCulture) : "0";
 
+        /// <summary>Formats an in-game day, 24-hour clock hour, and minute as a coloured HUD caption ("DAY 580  TIME 5:45 PM").</summary>
+        public static string FormatClock(long day, int hour24, int minute, bool includeTimeWord = true)
+        {
+            var ci = CultureInfo.InvariantCulture;
+            int h24 = ((hour24 % 24) + 24) % 24;
+            int min = Math.Clamp(minute, 0, 59);
+            int h12 = h24 % 12;
+            if (h12 == 0) h12 = 12;
+            string time = h12.ToString(ci) + ":" + min.ToString("00", ci) + (h24 < 12 ? " AM" : " PM");
+            return includeTimeWord
+                ? "#E8B84BDAY #FFFFFF" + day.ToString(ci) + "  #E8B84BTIME #FFFFFF" + time
+                : "#E8B84BDAY #FFFFFF" + day.ToString(ci) + "  #FFFFFF" + time;
+        }
+
+        /// <summary>Formats in-game hours (day 1 starts at 0 h) as a coloured HUD caption ("DAY 580  TIME 5:45 PM").</summary>
+        public static string FormatClock(double gameHours, bool includeTimeWord = true)
+        {
+            if (!double.IsFinite(gameHours) || gameHours < 0) return "";
+            double dayIndex = Math.Floor(gameHours / 24.0);
+            int day = (int)dayIndex + 1;
+            double hod = gameHours - dayIndex * 24.0;
+            int totalMin = (int)Math.Floor(hod * 60.0 + 1e-6);
+            if (totalMin >= 24 * 60) totalMin = 24 * 60 - 1;
+            return FormatClock(day, (totalMin / 60) % 24, totalMin % 60, includeTimeWord);
+        }
+
+        /// <summary>Formats the player's money as a coloured HUD caption ("CATS 2,642").</summary>
+        public static string FormatCats(long money) =>
+            "#E8B84BCATS #FFFFFF" + money.ToString("#,0", CultureInfo.InvariantCulture);
+
+        /// <summary>Formats the game clock's speed or paused state as a coloured HUD caption ("SPEED 2x" or "PAUSED").</summary>
+        public static string FormatSpeed(bool paused, double speed)
+        {
+            if (paused || !double.IsFinite(speed) || speed <= 0.01) return "#FF5E52PAUSED";
+            var ci = CultureInfo.InvariantCulture;
+            double r = Math.Round(speed);
+            string num = Math.Abs(speed - r) < 0.05 ? r.ToString("0", ci) : speed.ToString("0.#", ci);
+            return "#E8B84BSPEED #FFFFFF" + num + "x";
+        }
+
+        /// <summary>Converts Kenshi/MeitouClient hunger (0..3 or 0..300, where max is full) to 0..100%. Returns -1 for invalid values.</summary>
+        public static float FedPercent(float hunger)
+        {
+            if (!float.IsFinite(hunger)) return -1f;
+            float pct = hunger <= 3.05f ? hunger / 3.0f * 100f : hunger / 300.0f * 100f;
+            return Math.Clamp(pct, 0f, 100f);
+        }
+
+        /// <summary>Bar colour along the red -> amber -> yellow -> green health/hunger ramp (t in 0..1).</summary>
+        public static void BarRampRgb(float t, out float r, out float g, out float b)
+        {
+            t = Math.Clamp(t, 0f, 1f);
+            if (t < 0.45f)
+            {
+                float u = t / 0.45f;
+                r = 0.90f + (0.96f - 0.90f) * u;
+                g = 0.24f + (0.58f - 0.24f) * u;
+                b = 0.18f + (0.14f - 0.18f) * u;
+            }
+            else if (t < 0.78f)
+            {
+                float u = (t - 0.45f) / 0.33f;
+                r = 0.96f + (0.80f - 0.96f) * u;
+                g = 0.58f + (0.86f - 0.58f) * u;
+                b = 0.14f + (0.24f - 0.14f) * u;
+            }
+            else
+            {
+                float u = (t - 0.78f) / 0.22f;
+                r = 0.80f + (0.34f - 0.80f) * u;
+                g = 0.86f + (0.88f - 0.86f) * u;
+                b = 0.24f + (0.44f - 0.24f) * u;
+            }
+        }
+
+        /// <summary>MyGUI text colour tag for a meter label/value (green >= 70%, gold 35..69%, red < 35%).</summary>
+        public static string MeterTextColour(float pct) =>
+            pct >= 70f ? "0.54 0.92 0.58" : pct >= 35f ? "0.96 0.78 0.34" : "0.98 0.40 0.34";
+
         public static string JsonText(string s)
         {
             if (s == null) return "null";
@@ -1076,17 +1155,32 @@ namespace TimeLightMap
         /// <summary>A plain text as a caption: every '#' doubled. The same object when there is none.</summary>
         public static string Escape(string s) => string.IsNullOrEmpty(s) ? "" : s.IndexOf('#') < 0 ? s : s.Replace("#", "##");
 
-        /// <summary>How many characters an escaped caption shows ("##" is one).</summary>
+        /// <summary>How many characters a caption shows ("##" is one; MyGUI "#RRGGBB" colour tags show zero).</summary>
         public static int ShownLength(string caption)
         {
             if (string.IsNullOrEmpty(caption)) return 0;
             int n = 0;
             for (int i = 0; i < caption.Length; i++)
             {
-                if (caption[i] == '#' && i + 1 < caption.Length && caption[i + 1] == '#') i++;
+                if (caption[i] == '#')
+                {
+                    if (i + 1 < caption.Length && caption[i + 1] == '#') { i++; n++; continue; }
+                    if (i + 7 <= caption.Length && IsHex6(caption, i + 1)) { i += 6; continue; }
+                }
                 n++;
             }
             return n;
+        }
+
+        static bool IsHex6(string s, int start)
+        {
+            for (int k = 0; k < 6; k++)
+            {
+                char ch = s[start + k];
+                bool hex = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+                if (!hex) return false;
+            }
+            return true;
         }
 
         /// <summary>Readable map label for a moving trade caravan: keeps descriptive character names like
@@ -1109,6 +1203,179 @@ namespace TimeLightMap
             || s.IndexOf("merchant", StringComparison.OrdinalIgnoreCase) >= 0
             || s.IndexOf("nomad", StringComparison.OrdinalIgnoreCase) >= 0
             || s.IndexOf("vendor", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        /// <summary>Whether a faction name is a generic wildlife / empty bucket where the unit's own type (e.g. "Beak Thing")
+        /// is far more informative than the faction name (e.g. "Gutters").</summary>
+        public static bool IsGenericFoeFaction(string factionName)
+        {
+            if (string.IsNullOrWhiteSpace(factionName)) return true;
+            switch (factionName.Trim().ToLowerInvariant())
+            {
+                case "none":
+                case "neutral":
+                case "gutters":
+                case "wildlife":
+                case "animals":
+                case "creatures":
+                case "fauna":
+                case "monsters":
+                case "predators":
+                case "spiders":
+                case "insects":
+                case "beasts":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>Readable map label for a hostile unit or clustered enemy group: e.g. "Dust Bandits x6",
+        /// "Beak Thing x3", "Dust Boss (Dust Bandits)", or "Dust Bandit".</summary>
+        public static string FoeLabel(string unitName, string factionName, int count)
+        {
+            string un = string.IsNullOrWhiteSpace(unitName) ? null : unitName.Trim();
+            string fn = string.IsNullOrWhiteSpace(factionName) || IsGenericFoeFaction(factionName) ? null : factionName.Trim();
+            if (count > 1)
+            {
+                string group = fn ?? un ?? "Hostiles";
+                return group + " x" + count.ToString(CultureInfo.InvariantCulture);
+            }
+            if (un != null && fn != null)
+            {
+                if (SameFoeStem(un, fn)) return un;
+                if (un.Length + fn.Length + 3 <= 30) return un + " (" + fn + ")";
+                return fn;
+            }
+            return un ?? fn ?? "Hostile";
+        }
+
+        static bool SameFoeStem(string unit, string faction)
+        {
+            if (unit.IndexOf(faction, StringComparison.OrdinalIgnoreCase) >= 0
+                || faction.IndexOf(unit, StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            if (faction.EndsWith("men", StringComparison.OrdinalIgnoreCase) && faction.Length > 3)
+            {
+                string man = faction.Substring(0, faction.Length - 3) + "man";
+                if (unit.IndexOf(man, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            }
+            string fStem = faction.EndsWith("es", StringComparison.OrdinalIgnoreCase) && faction.Length > 4
+                ? faction.Substring(0, faction.Length - 2)
+                : faction.EndsWith("s", StringComparison.OrdinalIgnoreCase) && faction.Length > 3
+                    ? faction.Substring(0, faction.Length - 1)
+                    : faction;
+            return fStem.Length >= 3 && unit.IndexOf(fStem, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+    }
+
+    /// <summary>When hostile faction/type labels are shown on the map: Off (red dots only), Auto (only enemies actively
+    /// attacking or fighting the player's squad), or On (all visible hostile groups).</summary>
+    internal enum FoeLabelMode { Off = 0, Auto = 1, On = 2 }
+
+    /// <summary>Groups nearby visible hostile markers of the same faction (or same creature type for wildlife) into clean
+    /// screen-space clusters so swarms get one concise label like "Dust Bandits x6" instead of overlapping tags.
+    /// Zero per-frame allocation.</summary>
+    internal sealed class FoeClusterer
+    {
+        public const int MaxPoints = 48, MaxClusters = 16;
+        public const float ClusterPx = 75f;
+
+        public int PointCount;
+        readonly float[] _px = new float[MaxPoints], _py = new float[MaxPoints];
+        readonly int[] _factionId = new int[MaxPoints];
+        readonly string[] _factionName = new string[MaxPoints], _unitName = new string[MaxPoints];
+        readonly bool[] _fighting = new bool[MaxPoints], _used = new bool[MaxPoints];
+
+        public int ClusterCount;
+        public readonly float[] CX = new float[MaxClusters], CY = new float[MaxClusters];
+        public readonly int[] Count = new int[MaxClusters];
+        public readonly bool[] Fighting = new bool[MaxClusters];
+        public readonly string[] Label = new string[MaxClusters];
+        public readonly long[] Key = new long[MaxClusters];
+
+        public void Clear()
+        {
+            PointCount = 0;
+            ClusterCount = 0;
+        }
+
+        public void Add(float px, float py, int factionId, string factionName, string unitName, bool fighting)
+        {
+            if (PointCount >= MaxPoints || !float.IsFinite(px) || !float.IsFinite(py)) return;
+            int i = PointCount++;
+            _px[i] = px;
+            _py[i] = py;
+            _factionId[i] = factionId;
+            _factionName[i] = factionName;
+            _unitName[i] = unitName;
+            _fighting[i] = fighting;
+            _used[i] = false;
+        }
+
+        static bool SameGroup(int fA, string fnA, string unA, int fB, string fnB, string unB)
+        {
+            bool genA = fA < 0 || CaptionText.IsGenericFoeFaction(fnA);
+            bool genB = fB < 0 || CaptionText.IsGenericFoeFaction(fnB);
+            if (!genA && !genB) return fA == fB;
+            if (genA != genB) return false;
+            return string.Equals(unA?.Trim(), unB?.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        public void Build(FoeLabelMode mode)
+        {
+            ClusterCount = 0;
+            if (mode == FoeLabelMode.Off || PointCount == 0) return;
+            float r2 = ClusterPx * ClusterPx;
+            for (int i = 0; i < PointCount && ClusterCount < MaxClusters; i++)
+            {
+                if (_used[i]) continue;
+                _used[i] = true;
+                float sumX = _px[i], sumY = _py[i];
+                int n = 1;
+                bool fight = _fighting[i];
+                int fid = _factionId[i];
+                string fname = _factionName[i], uname = _unitName[i];
+
+                // Absorb nearby members of the same faction/type (one-pass centroid-aware cluster)
+                for (int j = i + 1; j < PointCount; j++)
+                {
+                    if (_used[j]) continue;
+                    if (!SameGroup(fid, fname, uname, _factionId[j], _factionName[j], _unitName[j])) continue;
+                    float cx = sumX / n, cy = sumY / n;
+                    float dx = _px[j] - cx, dy = _py[j] - cy;
+                    if (dx * dx + dy * dy > r2) continue;
+                    _used[j] = true;
+                    sumX += _px[j];
+                    sumY += _py[j];
+                    n++;
+                    if (_fighting[j])
+                    {
+                        if (!fight && !string.IsNullOrWhiteSpace(_unitName[j])) uname = _unitName[j];
+                        fight = true;
+                    }
+                    if (string.IsNullOrWhiteSpace(fname) && !string.IsNullOrWhiteSpace(_factionName[j])) fname = _factionName[j];
+                    if (string.IsNullOrWhiteSpace(uname) && !string.IsNullOrWhiteSpace(_unitName[j])) uname = _unitName[j];
+                }
+
+                if (mode == FoeLabelMode.Auto && !fight) continue;
+
+                int c = ClusterCount++;
+                CX[c] = sumX / n;
+                CY[c] = sumY / n;
+                Count[c] = n;
+                Fighting[c] = fight;
+                string label = CaptionText.FoeLabel(uname, fname, n);
+                Label[c] = label;
+                unchecked
+                {
+                    long h = 1469598103934665603L ^ 0x464F454C4142L;
+                    h = (h ^ fid) * 1099511628211L;
+                    string keyName = !CaptionText.IsGenericFoeFaction(fname) ? fname : (uname ?? label);
+                    foreach (char ch in keyName ?? "") h = (h ^ char.ToLowerInvariant(ch)) * 1099511628211L;
+                    Key[c] = h;
+                }
+            }
+        }
     }
 
     /// <summary>
